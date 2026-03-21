@@ -1,0 +1,8 @@
+node_modules
+/dist
+ui/dist
+**/.DS_Store
+/tmp
+/test-results
+.vscode/
+.github/agents

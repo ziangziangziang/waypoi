@@ -1,0 +1,40 @@
+scenarios:
+  - id: custom-chat-short
+    mode: chat
+    prompt: "Reply with WAYPOI_CUSTOM_OK"
+    assertions:
+      contains: "WAYPOI_CUSTOM_OK"
+      statusCode: 200
+
+  - id: custom-agent-tools
+    mode: agent
+    prompt: "If tools are available, call one and summarize with prefix WAYPOI_AGENT_DONE:"
+    maxIterations: 5
+    assertions:
+      contains: "WAYPOI_AGENT_DONE"
+      statusCode: 200
+
+  - id: custom-embeddings
+    mode: embeddings
+    input:
+      - "waypoi"
+      - "benchmark"
+    assertions:
+      minItems: 2
+      minVectorLength: 1
+      statusCode: 200
+
+  - id: custom-image
+    mode: image_generation
+    prompt: "A clean neon gateway symbol"
+    assertions:
+      minImages: 1
+      statusCode: 200
+
+  - id: custom-tts
+    mode: audio_speech
+    inputText: "Waypoi benchmark audio"
+    voice: "alloy"
+    assertions:
+      minBytes: 1
+      statusCode: 200

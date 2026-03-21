@@ -1,0 +1,59 @@
+{
+  "name": "waypoi",
+  "version": "0.7.1-alpha.0",
+  "description": "Local OpenAI-compatible AI gateway with intelligent routing, failover, MCP tools, and a built-in playground UI",
+  "license": "MIT",
+  "main": "dist/src/index.js",
+  "bin": {
+    "waypoi": "dist/cli/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ziangziangziang/waypoi.git"
+  },
+  "homepage": "https://github.com/ziangziangziang/waypoi#readme",
+  "bugs": {
+    "url": "https://github.com/ziangziangziang/waypoi/issues"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "proxy",
+    "openai",
+    "mcp",
+    "local-ai",
+    "gateway",
+    "playground"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "build:ui": "cd ui && npm run build",
+    "build:all": "npm run build && npm run build:ui",
+    "start": "node dist/src/index.js",
+    "cli": "tsx cli/index.ts",
+    "seed": "tsx scripts/seed.ts",
+    "manual-test": "bash scripts/manual-test.sh",
+    "test": "npx playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/static": "^7.0.4",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "commander": "^12.1.0",
+    "fastify": "^4.28.1",
+    "sharp": "^0.33.5",
+    "undici": "^6.19.8",
+    "yaml": "^2.4.5",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^20.14.10",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4"
+  }
+}
