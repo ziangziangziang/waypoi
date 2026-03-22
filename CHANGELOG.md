@@ -21,6 +21,12 @@ All notable changes to Waypoi are documented here.
 - `understand_image` preserves original image geometry for coordinate-sensitive tasks
 - Agent Playground supports up to 10 tool iterations per user message with stop control
 
+## [0.7.1-alpha.1] - 2026-03-21
+
+### Changed
+
+- Fix test runner: replaced Playwright with `npx tsx --test`; removed `@playwright/test` dev dependency.
+
 ## [0.7.1-alpha.0] - 2026-03-20
 
 ### Breaking Changes
