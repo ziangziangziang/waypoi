@@ -35,9 +35,8 @@
     "build:all": "npm run build && npm run build:ui",
     "start": "node dist/src/index.js",
     "cli": "tsx cli/index.ts",
-    "seed": "tsx scripts/seed.ts",
     "manual-test": "bash scripts/manual-test.sh",
-    "test": "npx playwright test",
+    "test": "npx tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -51,7 +50,6 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
     "@types/node": "^20.14.10",
     "tsx": "^4.16.2",
     "typescript": "^5.5.4"
