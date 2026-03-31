@@ -174,6 +174,7 @@ interface ListCaptureRecordsOptions {
   limit?: number;
   offset?: number;
   date?: string;
+  timeZone?: string;
 }
 
 function captureDir(paths: StoragePaths): string {
@@ -326,10 +327,11 @@ export async function listCaptureRecords(
     typeof options === "number"
       ? { limit: options, offset: 0 }
       : { limit: 5, offset: 0, ...options };
+  const timeZone = normalizeTimeZone(opts.timeZone);
   const limit = Math.max(1, Math.min(200, Math.floor(opts.limit ?? 5)));
   const offset = Math.max(0, Math.floor(opts.offset ?? 0));
   const filtered = opts.date
-    ? entries.filter((entry) => utcDateString(entry.timestamp) === opts.date)
+    ? entries.filter((entry) => dateStringForTimeZone(entry.timestamp, timeZone) === opts.date)
     : entries;
   const newestFirst = [...filtered].reverse();
   return {
@@ -358,13 +360,15 @@ export async function getCaptureRecordById(
 
 export async function getCaptureCalendarMonth(
   paths: StoragePaths,
-  month: string
+  month: string,
+  timeZone = "UTC"
 ): Promise<CaptureCalendarDaySummary[]> {
   await ensureCaptureStore(paths);
   const entries = await readCaptureIndex(paths, { pruneMissing: true });
+  const normalizedTimeZone = normalizeTimeZone(timeZone);
   const counts = new Map<string, number>();
   for (const entry of entries) {
-    const date = utcDateString(entry.timestamp);
+    const date = dateStringForTimeZone(entry.timestamp, normalizedTimeZone);
     if (!date.startsWith(`${month}-`)) continue;
     counts.set(date, (counts.get(date) ?? 0) + 1);
   }
@@ -596,6 +600,18 @@ function buildResponseTimeline(responseBody: unknown): CaptureTimelineEntry[] {
           metadata: merged.metadata,
         });
       }
+      const streamedToolCalls = extractStreamToolCalls(text);
+      streamedToolCalls.forEach((toolCall, idx) =>
+        push({
+          kind: "tool_call",
+          role: "assistant",
+          sourcePath: `response.body.stream.tool_calls[${idx}]`,
+          name: toolCall.function?.name,
+          arguments: toolCall.function?.arguments,
+          toolCallId: toolCall.id,
+          metadata: toolCall.type ? { type: toolCall.type } : undefined,
+        })
+      );
     } else {
       push({
         kind: "stream_preview",
@@ -850,15 +866,7 @@ function buildMergedSsePreview(text: string): { content: string; metadata?: Reco
   const entries = parseSsePreview(text);
   if (entries.length === 0) return null;
 
-  const textChunks: string[] = [];
-  for (const entry of entries) {
-    const extracted = extractStreamText(entry.metadata);
-    if (extracted) {
-      textChunks.push(extracted);
-    }
-  }
-
-  const mergedText = textChunks.join("");
+  const mergedText = mergeUsefulSseText(entries);
   if (mergedText.trim()) {
     return {
       content: mergedText,
@@ -870,6 +878,27 @@ function buildMergedSsePreview(text: string): { content: string; metadata?: Reco
     content: entries.map((entry) => entry.content).join("\n\n"),
     metadata: { events: entries.length, mode: "merged_events" },
   };
+}
+
+function extractMergedUsefulSseText(text: string): string {
+  return mergeUsefulSseText(parseSsePreview(text));
+}
+
+function mergeUsefulSseText(entries: Array<{ content: string; metadata?: Record<string, unknown> }>): string {
+  const textChunks: string[] = [];
+  for (const entry of entries) {
+    const extracted = extractStreamText(entry.metadata);
+    if (extracted) {
+      textChunks.push(extracted);
+    }
+  }
+  return textChunks.join("");
+}
+
+function mergeSseEventPayloadText(text: string): string {
+  const entries = parseSsePreview(text);
+  if (entries.length === 0) return "";
+  return entries.map((entry) => entry.content).join("\n\n");
 }
 
 function extractStreamText(value: unknown): string {
@@ -930,12 +959,90 @@ function extractStreamText(value: unknown): string {
   return outputChunks.join("");
 }
 
+function extractStreamToolCalls(text: string): CaptureToolCall[] {
+  const entries = parseSsePreview(text);
+  type Builder = {
+    id?: string;
+    type?: string;
+    functionName: string;
+    functionArguments: string;
+  };
+  const byIndex = new Map<number, Builder>();
+  const order: number[] = [];
+
+  const ensureBuilder = (index: number): Builder => {
+    const existing = byIndex.get(index);
+    if (existing) return existing;
+    const created: Builder = { functionName: "", functionArguments: "" };
+    byIndex.set(index, created);
+    order.push(index);
+    return created;
+  };
+
+  for (const entry of entries) {
+    const payload = asRecord(entry.metadata);
+    if (!payload) continue;
+
+    const choices = Array.isArray(payload.choices) ? payload.choices : [];
+    for (const choice of choices) {
+      const choiceRecord = asRecord(choice);
+      if (!choiceRecord) continue;
+      const delta = asRecord(choiceRecord.delta);
+      if (!delta) continue;
+
+      const deltaToolCalls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [];
+      for (const item of deltaToolCalls) {
+        const callRecord = asRecord(item);
+        if (!callRecord) continue;
+        const index = typeof callRecord.index === "number" ? Math.max(0, Math.floor(callRecord.index)) : 0;
+        const builder = ensureBuilder(index);
+        if (typeof callRecord.id === "string") builder.id = callRecord.id;
+        if (typeof callRecord.type === "string") builder.type = callRecord.type;
+        const fn = asRecord(callRecord.function);
+        if (fn) {
+          if (typeof fn.name === "string") builder.functionName += fn.name;
+          if (typeof fn.arguments === "string") builder.functionArguments += fn.arguments;
+        }
+      }
+
+      const legacyFunctionCall = asRecord(delta.function_call);
+      if (legacyFunctionCall) {
+        const builder = ensureBuilder(0);
+        builder.type = builder.type ?? "function";
+        if (typeof legacyFunctionCall.name === "string") builder.functionName += legacyFunctionCall.name;
+        if (typeof legacyFunctionCall.arguments === "string") builder.functionArguments += legacyFunctionCall.arguments;
+      }
+    }
+  }
+
+  const calls: CaptureToolCall[] = [];
+  for (const index of order) {
+    const built = byIndex.get(index);
+    if (!built) continue;
+    const call: CaptureToolCall = {};
+    if (built.id) call.id = built.id;
+    if (built.type) call.type = built.type;
+    const hasName = built.functionName.trim().length > 0;
+    const hasArguments = built.functionArguments.length > 0;
+    if (hasName || hasArguments) {
+      call.function = {};
+      if (hasName) call.function.name = built.functionName;
+      if (hasArguments) call.function.arguments = built.functionArguments;
+    }
+    if (call.id || call.type || call.function) {
+      calls.push(call);
+    }
+  }
+  return calls;
+}
+
 const INPUT_TOKEN_CATEGORIES: Array<{ key: string; label: string }> = [
   { key: "instructions", label: "Instructions" },
   { key: "system", label: "System" },
   { key: "developer", label: "Developer" },
   { key: "user", label: "User" },
   { key: "assistant_history", label: "Assistant History" },
+  { key: "input_media", label: "Input Media" },
   { key: "tool_results", label: "Tool Results" },
   { key: "tool_definitions", label: "Tool Definitions" },
   { key: "unattributed_input", label: "Unattributed Input" },
@@ -970,14 +1077,33 @@ function buildTokenFlowProjection(
   const usage = extractTokenUsageTotals(responseBody);
   const estimatedInput = estimateInputCategoryTokens(source);
   const estimatedOutput = estimateOutputCategoryTokens(responseBody);
+  const streamSource = estimatedOutput.streamSource;
+  const estimatedOutputTokens = estimatedOutput.tokens;
 
   const hasExactSides = usage.inputTokens !== null && usage.outputTokens !== null;
   if (hasExactSides) {
     const inputExact = usage.inputTokens as number;
     const outputExact = usage.outputTokens as number;
     const inputBuckets = scaleCategoryTokens(INPUT_TOKEN_CATEGORIES, estimatedInput, inputExact);
-    const outputBuckets = scaleCategoryTokens(OUTPUT_TOKEN_CATEGORIES, estimatedOutput, outputExact);
+    const outputBuckets = scaleCategoryTokens(OUTPUT_TOKEN_CATEGORIES, estimatedOutputTokens, outputExact);
     const totalTokens = usage.totalTokens ?? inputExact + outputExact;
+    const notes = [
+      "Input/output totals are exact from response usage.",
+      "Category slices are estimated from captured content structure.",
+    ];
+    if (streamSource === "timeline_text_with_tool_calls") {
+      notes.push(
+        "For streamed responses, output categories are estimated from extracted timeline-equivalent SSE text and reconstructed streamed tool-call deltas."
+      );
+    } else if (streamSource === "timeline_text") {
+      notes.push("For streamed responses, output categories are estimated from extracted timeline-equivalent SSE text.");
+    } else if (streamSource === "timeline_tool_calls_only") {
+      notes.push(
+        "For streamed responses, output categories are estimated from reconstructed streamed tool-call deltas."
+      );
+    } else if (streamSource === "fallback_events") {
+      notes.push("For streamed responses, no useful SSE text was extracted; output fallback uses merged SSE event payload text (lower confidence).");
+    }
     return {
       eligible: true,
       method: "exact_totals_estimated_categories",
@@ -988,15 +1114,12 @@ function buildTokenFlowProjection(
       },
       input: inputBuckets,
       output: outputBuckets,
-      notes: [
-        "Input/output totals are exact from response usage.",
-        "Category slices are estimated from captured content structure.",
-      ],
+      notes,
     };
   }
 
   const rawInputTotal = sumTokenMapValues(estimatedInput);
-  const rawOutputTotal = sumTokenMapValues(estimatedOutput);
+  const rawOutputTotal = sumTokenMapValues(estimatedOutputTokens);
   let estimatedInputTotal = rawInputTotal;
   let estimatedOutputTotal = rawOutputTotal;
   if (usage.totalTokens !== null && usage.totalTokens > 0 && rawInputTotal + rawOutputTotal > 0) {
@@ -1011,8 +1134,24 @@ function buildTokenFlowProjection(
       : mapTokensToBuckets(INPUT_TOKEN_CATEGORIES, estimatedInput);
   const outputBuckets =
     estimatedOutputTotal !== rawOutputTotal
-      ? scaleCategoryTokens(OUTPUT_TOKEN_CATEGORIES, estimatedOutput, estimatedOutputTotal)
-      : mapTokensToBuckets(OUTPUT_TOKEN_CATEGORIES, estimatedOutput);
+      ? scaleCategoryTokens(OUTPUT_TOKEN_CATEGORIES, estimatedOutputTokens, estimatedOutputTotal)
+      : mapTokensToBuckets(OUTPUT_TOKEN_CATEGORIES, estimatedOutputTokens);
+
+  const notes = [
+    "Input/output totals are estimated from captured content.",
+    "Category slices are estimated from captured content structure.",
+  ];
+  if (streamSource === "timeline_text_with_tool_calls") {
+    notes.push(
+      "For streamed responses, output categories are estimated from extracted timeline-equivalent SSE text and reconstructed streamed tool-call deltas."
+    );
+  } else if (streamSource === "timeline_text") {
+    notes.push("For streamed responses, output categories are estimated from extracted timeline-equivalent SSE text.");
+  } else if (streamSource === "timeline_tool_calls_only") {
+    notes.push("For streamed responses, output categories are estimated from reconstructed streamed tool-call deltas.");
+  } else if (streamSource === "fallback_events") {
+    notes.push("For streamed responses, no useful SSE text was extracted; output fallback uses merged SSE event payload text (lower confidence).");
+  }
 
   return {
     eligible: true,
@@ -1024,10 +1163,7 @@ function buildTokenFlowProjection(
     },
     input: inputBuckets,
     output: outputBuckets,
-    notes: [
-      "Input/output totals are estimated from captured content.",
-      "Category slices are estimated from captured content structure.",
-    ],
+    notes,
   };
 }
 
@@ -1076,6 +1212,7 @@ function estimateInputCategoryTokens(source: Record<string, unknown> | null | un
       if (!record) continue;
       const role = normalizeRole(record.role);
       const text = extractTextContent(record.content);
+      tokens.input_media += estimateMediaTokensFromContent(record.content);
       if (role === "system") tokens.system += roughTokenEstimate(text);
       else if (role === "developer") tokens.developer += roughTokenEstimate(text);
       else if (role === "user") tokens.user += roughTokenEstimate(text);
@@ -1108,12 +1245,15 @@ function estimateInputCategoryTokens(source: Record<string, unknown> | null | un
       if (type === "message") {
         const role = normalizeRole(record.role);
         const text = extractTextContent(record.content);
+        tokens.input_media += estimateMediaTokensFromContent(record.content);
         if (role === "system") tokens.system += roughTokenEstimate(text);
         else if (role === "developer") tokens.developer += roughTokenEstimate(text);
         else if (role === "user") tokens.user += roughTokenEstimate(text);
         else if (role === "assistant") tokens.assistant_history += roughTokenEstimate(text);
         else if (role === "tool") tokens.tool_results += roughTokenEstimate(text);
         else tokens.unattributed_input += roughTokenEstimate(text);
+      } else if (isMediaInputItem(record)) {
+        tokens.input_media += estimateMediaTokensFromItem(record);
       } else if (type === "function_call_output") {
         tokens.tool_results += roughTokenEstimate(stringifyMaybe(record.output));
       } else if (type === "function_call") {
@@ -1139,12 +1279,71 @@ function estimateInputCategoryTokens(source: Record<string, unknown> | null | un
   return tokens;
 }
 
-function estimateOutputCategoryTokens(responseBody: unknown): Record<string, number> {
+function estimateMediaTokensFromContent(content: unknown): number {
+  if (!Array.isArray(content)) return 0;
+  let total = 0;
+  for (const part of content) {
+    const record = asRecord(part);
+    if (!record) continue;
+    if (isTextPart(record)) continue;
+    if (isMediaInputItem(record)) {
+      total += estimateMediaTokensFromItem(record);
+    }
+  }
+  return total;
+}
+
+function isTextPart(record: Record<string, unknown>): boolean {
+  const type = typeof record.type === "string" ? record.type : "";
+  return type === "text" || type === "input_text" || type === "output_text";
+}
+
+function isMediaInputItem(record: Record<string, unknown>): boolean {
+  const type = typeof record.type === "string" ? record.type.toLowerCase() : "";
+  if (type.includes("image") || type.includes("audio")) return true;
+  return (
+    record.image_url !== undefined ||
+    record.input_image !== undefined ||
+    record.image !== undefined ||
+    record.input_audio !== undefined ||
+    record.audio !== undefined
+  );
+}
+
+function estimateMediaTokensFromItem(record: Record<string, unknown>): number {
+  const type = typeof record.type === "string" ? record.type.toLowerCase() : "";
+  if (type.includes("image") || record.image_url !== undefined || record.input_image !== undefined || record.image !== undefined) {
+    return estimateImageTokens(record);
+  }
+  if (type.includes("audio") || record.input_audio !== undefined || record.audio !== undefined) {
+    return 256;
+  }
+  return 128;
+}
+
+function estimateImageTokens(record: Record<string, unknown>): number {
+  let detail: unknown = record.detail;
+  const imageUrl = asRecord(record.image_url);
+  if (detail === undefined && imageUrl) detail = imageUrl.detail;
+  if (detail === "high") return 768;
+  if (detail === "low") return 128;
+  return 256;
+}
+
+function estimateOutputCategoryTokens(responseBody: unknown): {
+  tokens: Record<string, number>;
+  streamSource?:
+    | "timeline_text"
+    | "timeline_text_with_tool_calls"
+    | "timeline_tool_calls_only"
+    | "fallback_events"
+    | "none";
+} {
   const tokens = initCategoryTokenMap(OUTPUT_TOKEN_CATEGORIES);
   const body = asRecord(responseBody);
   if (!body) {
     tokens.unattributed_output += roughTokenEstimate(stringifyMaybe(responseBody));
-    return tokens;
+    return { tokens };
   }
 
   const error = asRecord(body.error);
@@ -1156,11 +1355,40 @@ function estimateOutputCategoryTokens(responseBody: unknown): Record<string, num
 
   if (body.$type === "stream") {
     if (typeof body.text === "string") {
-      tokens.assistant_text += roughTokenEstimate(body.text);
+      const usefulText = extractMergedUsefulSseText(body.text);
+      const streamedToolCalls = extractStreamToolCalls(body.text);
+      const hasUsefulText = usefulText.trim().length > 0;
+      const hasToolCalls = streamedToolCalls.length > 0;
+
+      if (hasUsefulText) {
+        tokens.assistant_text += roughTokenEstimate(usefulText);
+      }
+      if (hasToolCalls) {
+        for (const toolCall of streamedToolCalls) {
+          const callText = `${toolCall.function?.name ?? ""} ${toolCall.function?.arguments ?? ""}`.trim();
+          tokens.tool_calls += roughTokenEstimate(callText);
+        }
+      }
+      if (hasUsefulText && hasToolCalls) {
+        return { tokens, streamSource: "timeline_text_with_tool_calls" };
+      }
+      if (hasUsefulText) {
+        return { tokens, streamSource: "timeline_text" };
+      }
+      if (hasToolCalls) {
+        return { tokens, streamSource: "timeline_tool_calls_only" };
+      }
+
+      const fallback = mergeSseEventPayloadText(body.text);
+      if (fallback.trim()) {
+        tokens.unattributed_output += roughTokenEstimate(fallback);
+        return { tokens, streamSource: "fallback_events" };
+      }
     } else if (typeof body.note === "string") {
       tokens.unattributed_output += roughTokenEstimate(body.note);
+      return { tokens, streamSource: "none" };
     }
-    return tokens;
+    return { tokens, streamSource: "none" };
   }
 
   if (Array.isArray(body.output)) {
@@ -1180,7 +1408,7 @@ function estimateOutputCategoryTokens(responseBody: unknown): Record<string, num
         tokens.unattributed_output += roughTokenEstimate(stringifyMaybe(record));
       }
     }
-    return tokens;
+    return { tokens };
   }
 
   if (Array.isArray(body.choices)) {
@@ -1197,11 +1425,11 @@ function estimateOutputCategoryTokens(responseBody: unknown): Record<string, num
         tokens.tool_calls += roughTokenEstimate(`${toolCall.function?.name ?? ""} ${toolCall.function?.arguments ?? ""}`.trim());
       }
     }
-    return tokens;
+    return { tokens };
   }
 
   tokens.unattributed_output += roughTokenEstimate(stringifyMaybe(body));
-  return tokens;
+  return { tokens };
 }
 
 function initCategoryTokenMap(categories: Array<{ key: string }>): Record<string, number> {
@@ -1302,8 +1530,32 @@ function stringifyMaybe(value: unknown): string {
   }
 }
 
-function utcDateString(timestamp: string): string {
-  return timestamp.slice(0, 10);
+function dateStringForTimeZone(timestamp: string, timeZone: string): string {
+  const value = new Date(timestamp);
+  if (!Number.isFinite(value.getTime())) {
+    return timestamp.slice(0, 10);
+  }
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(value);
+  const year = parts.find((part) => part.type === "year")?.value ?? "0000";
+  const month = parts.find((part) => part.type === "month")?.value ?? "00";
+  const day = parts.find((part) => part.type === "day")?.value ?? "00";
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeTimeZone(input: string | undefined): string {
+  if (!input) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: input });
+    return input;
+  } catch {
+    return "UTC";
+  }
 }
 
 function hydrateCaptureRecord(record: CaptureRecord): CaptureRecord {

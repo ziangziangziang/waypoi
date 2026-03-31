@@ -14,10 +14,10 @@ import { registerUiRoutes } from "./routes/ui";
 import { registerRequestStatsMiddleware } from "./middleware/requestStats";
 import { registerRequestCaptureMiddleware } from "./middleware/requestCapture";
 import { registerAuthHooks, loadAuthConfig, updateAuthConfig } from "./middleware/auth";
-import { startHealthChecker } from "./workers/healthChecker";
-import { startStatsRotation } from "./workers/statsRotation";
+import { startHealthChecker, stopHealthChecker } from "./workers/healthChecker";
+import { startStatsRotation, stopStatsRotation } from "./workers/statsRotation";
 import { startConfigWatcher, stopConfigWatcher } from "./workers/configWatcher";
-import { startCaptureRetentionWorker } from "./workers/captureRetention";
+import { startCaptureRetentionWorker, stopCaptureRetentionWorker } from "./workers/captureRetention";
 import { ensureStorageDir, resolveStoragePaths } from "./storage/files";
 import { invalidateConfigCache } from "./storage/repositories";
 import { discoverAllTools, disconnectAllServers, summarizeMcpError, discoverBuiltinTools } from "./mcp/discovery";
@@ -134,12 +134,30 @@ async function start(): Promise<void> {
   });
 
   // Graceful shutdown
+  let shuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (shuttingDown) {
+      console.log(`\n[${signal}] Forced exit.`);
+      process.exit(1);
+    }
+    shuttingDown = true;
     console.log(`\n[${signal}] Shutting down gracefully...`);
+
+    // Force exit after 5 seconds if graceful shutdown stalls
+    const forceTimer = setTimeout(() => {
+      console.error("[shutdown] Timed out, forcing exit.");
+      process.exit(1);
+    }, 5_000);
+    forceTimer.unref();
+
     stopConfigWatcher();
+    stopHealthChecker();
+    stopStatsRotation();
+    stopCaptureRetentionWorker();
     await closeMcpServiceRoutes();
     await disconnectAllServers();
     await app.close();
+    clearTimeout(forceTimer);
     process.exit(0);
   };
 

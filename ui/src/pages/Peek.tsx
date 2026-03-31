@@ -1,6 +1,31 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { sankey, sankeyLinkHorizontal } from 'd3-sankey'
+import { Copy } from 'lucide-react'
+import { toMermaidSankey } from '@/components/toMermaidSankey'
+// Simple copy button for Sankey mermaid code
+function CopyMermaidButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      setCopied(false)
+    }
+  }
+  return (
+    <button
+      onClick={handleCopy}
+      className="absolute top-2 right-2 z-10 p-1.5 rounded bg-background/80 hover:bg-secondary border border-border transition-colors"
+      title={copied ? 'Copied!' : 'Copy mermaid code'}
+      aria-label="Copy mermaid code"
+    >
+      <Copy className={copied ? 'text-green-500' : 'text-muted-foreground'} size={16} />
+    </button>
+  )
+}
 import {
   getCaptureCalendar,
   getCaptureConfig,
@@ -15,6 +40,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { extractEmbeddedMedia, redactEmbeddedMedia, type PeekEmbeddedMedia } from './peekMedia'
+import { filterCaptureRecords } from './peekFilters'
 
 type PeekTab = 'overview' | 'timeline' | 'request' | 'response' | 'media'
 
@@ -22,8 +48,8 @@ const DAY_PAGE_SIZE = 50
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 export function Peek() {
+  const browserTimeZone = getBrowserTimeZone()
   const [config, setConfig] = useState<{ enabled: boolean; retentionDays: number; maxBytes: number } | null>(null)
-  const [latestRecords, setLatestRecords] = useState<CaptureRecordSummary[]>([])
   const [dayRecords, setDayRecords] = useState<CaptureRecordSummary[]>([])
   const [dayTotal, setDayTotal] = useState(0)
   const [calendarDays, setCalendarDays] = useState<CaptureCalendarDaySummary[]>([])
@@ -36,22 +62,19 @@ export function Peek() {
   const [tab, setTab] = useState<PeekTab>('overview')
   const [error, setError] = useState<string | null>(null)
   const [tokenFlowOpen, setTokenFlowOpen] = useState(false)
+  const [ignoreModels, setIgnoreModels] = useState<boolean>(false)
+  const [showRawResponseBody, setShowRawResponseBody] = useState(false)
 
   const refreshOverview = async () => {
     setLoading(true)
     setError(null)
     try {
-      const [cfg, latest] = await Promise.all([
-        getCaptureConfig(),
-        listCaptureRecords({ limit: 5 }),
-      ])
+      const cfg = await getCaptureConfig()
       setConfig(cfg)
-      setLatestRecords(latest.data)
-      const fallbackDate = latest.data[0]?.timestamp.slice(0, 10) ?? new Date().toISOString().slice(0, 10)
+      const fallbackDate = formatDateForTimeZone(new Date(), browserTimeZone)
       const fallbackMonth = fallbackDate.slice(0, 7)
       setMonth((current) => current || fallbackMonth)
       setSelectedDate((current) => current || fallbackDate)
-      setSelectedId((current) => current ?? latest.data[0]?.id ?? null)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -65,25 +88,24 @@ export function Peek() {
 
   useEffect(() => {
     if (!month) return
-    void getCaptureCalendar(month)
+    void getCaptureCalendar(month, { timeZone: browserTimeZone })
       .then((calendar) => setCalendarDays(calendar.days))
       .catch((err) => setError((err as Error).message))
-  }, [month])
+  }, [month, browserTimeZone])
 
   useEffect(() => {
     if (!selectedDate) return
-    void listCaptureRecords({ date: selectedDate, limit: DAY_PAGE_SIZE, offset: dayOffset })
+    void listCaptureRecords({ date: selectedDate, limit: DAY_PAGE_SIZE, offset: dayOffset, timeZone: browserTimeZone })
       .then((result) => {
         setDayRecords(result.data)
         setDayTotal(result.total)
         setSelectedId((current) => {
           if (current && result.data.some((item) => item.id === current)) return current
-          if (current && latestRecords.some((item) => item.id === current)) return current
-          return result.data[0]?.id ?? latestRecords[0]?.id ?? null
+          return result.data[0]?.id ?? null
         })
       })
       .catch((err) => setError((err as Error).message))
-  }, [selectedDate, dayOffset, latestRecords])
+  }, [selectedDate, dayOffset, browserTimeZone])
 
   useEffect(() => {
     if (!selectedId) {
@@ -97,6 +119,10 @@ export function Peek() {
 
   useEffect(() => {
     setTokenFlowOpen(false)
+  }, [selectedId])
+
+  useEffect(() => {
+    setShowRawResponseBody(false)
   }, [selectedId])
 
   const mediaArtifacts = useMemo(() => detail?.artifacts ?? [], [detail])
@@ -116,6 +142,11 @@ export function Peek() {
   const responseTimeline = useMemo(() => detail?.analysis.responseTimeline ?? [], [detail])
   const calendarGrid = useMemo(() => buildCalendarGrid(month, calendarDays), [month, calendarDays])
   const tokenFlow = detail?.analysis.tokenFlow
+  const responseBodyView = useMemo(() => {
+    if (!detail) return null
+    const body = showRawResponseBody ? detail.response.body ?? null : buildAggregatedResponseBody(detail)
+    return redactEmbeddedMedia(body)
+  }, [detail, showRawResponseBody])
 
   const toggleCapture = async () => {
     if (!config) return
@@ -123,6 +154,36 @@ export function Peek() {
     setConfig(next)
     await refreshOverview()
   }
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('peek.ignoreModels')
+      setIgnoreModels(stored === '1')
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('peek.ignoreModels', ignoreModels ? '1' : '0')
+    } catch {
+      // ignore
+    }
+  }, [ignoreModels])
+
+  const visibleDayRecords = useMemo(() => {
+    return filterCaptureRecords(dayRecords, ignoreModels)
+  }, [dayRecords, ignoreModels])
+
+  // Ensure selectedId stays valid when filters change
+  useEffect(() => {
+    if (!selectedId) return
+    const existsInDay = visibleDayRecords.some((r) => r.id === selectedId)
+    if (!existsInDay) {
+      setSelectedId(visibleDayRecords[0]?.id ?? null)
+    }
+  }, [ignoreModels, visibleDayRecords, selectedId])
 
   const selectDate = (date: string) => {
     setSelectedDate(date)
@@ -132,9 +193,9 @@ export function Peek() {
   return (
     <>
       <div className="flex-1 flex flex-col h-full min-h-0">
-        <header className="sticky top-0 z-20 shrink-0 h-14 border-b border-border bg-background/95 backdrop-blur px-4 flex items-center gap-3">
+        <header className="sticky top-0 z-20 shrink-0 min-h-14 border-b border-border bg-background/95 backdrop-blur px-4 py-2 flex items-center gap-3">
         <h2 className="font-mono font-semibold text-sm uppercase tracking-wider">Peek</h2>
-        <span className="text-xs text-muted-foreground font-mono">Calendar browse + ordered capture timelines (UTC)</span>
+        <span className="min-w-0 max-w-[34ch] truncate text-xs text-muted-foreground font-mono">Calendar browse + ordered capture timelines ({browserTimeZone})</span>
         <div className="flex-1" />
         <Button size="sm" variant={config?.enabled ? 'default' : 'outline'} onClick={toggleCapture} disabled={!config}>
           Capture {config?.enabled ? 'On' : 'Off'}
@@ -142,6 +203,15 @@ export function Peek() {
         <Button size="sm" variant="outline" onClick={() => void refreshOverview()} disabled={loading}>
           Refresh
         </Button>
+        <label className="shrink-0 flex items-center gap-2 rounded border border-border px-2 py-1 text-xs font-mono">
+          <input
+            type="checkbox"
+            checked={ignoreModels}
+            onChange={(e) => setIgnoreModels(e.target.checked)}
+            className="h-4 w-4 shrink-0 accent-primary"
+          />
+          <span className="text-muted-foreground">Hide GET /v1/models</span>
+        </label>
       </header>
 
       <div className="flex-1 min-h-0 overflow-hidden flex">
@@ -182,16 +252,9 @@ export function Peek() {
             </div>
           </Section>
 
-          <Section title="Latest 5">
-            {latestRecords.length === 0 && <EmptyState label="No captured requests yet." />}
-            {latestRecords.map((record) => (
-              <RecordButton key={record.id} record={record} selected={selectedId === record.id} onSelect={setSelectedId} />
-            ))}
-          </Section>
-
           <Section title={selectedDate ? `Selected Day ${selectedDate}` : 'Selected Day'}>
             <div className="flex items-center justify-between text-xs font-mono text-muted-foreground">
-              <span>{dayTotal} captures</span>
+              <span>{ignoreModels ? visibleDayRecords.length : dayTotal} captures</span>
               <span>{dayOffset + 1}-{Math.min(dayOffset + DAY_PAGE_SIZE, dayTotal || 0)}</span>
             </div>
             <div className="flex items-center justify-between gap-2">
@@ -202,8 +265,8 @@ export function Peek() {
                 Older
               </Button>
             </div>
-            {dayRecords.length === 0 && <EmptyState label="No captures for this day." />}
-            {dayRecords.map((record) => (
+            {visibleDayRecords.length === 0 && dayRecords.length > 0 && <EmptyState label="No captures for this day match filter." />}
+            {visibleDayRecords.map((record) => (
               <RecordButton key={record.id} record={record} selected={selectedId === record.id} onSelect={setSelectedId} />
             ))}
           </Section>
@@ -311,8 +374,19 @@ export function Peek() {
                 <Section title="Detected Media">
                   <EmbeddedMediaList items={responseEmbeddedMedia} emptyLabel="No inline media detected in response body." />
                 </Section>
-                <Section title="Raw Response Body">
-                  <pre className="text-xs overflow-auto">{JSON.stringify(redactEmbeddedMedia(detail.response.body ?? null), null, 2)}</pre>
+                <Section title="Response Body">
+                  <div className="flex items-center justify-end">
+                    <label className="inline-flex items-center gap-2 text-xs font-mono text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={showRawResponseBody}
+                        onChange={(e) => setShowRawResponseBody(e.target.checked)}
+                        className="h-4 w-4 shrink-0 accent-primary"
+                      />
+                      <span>Raw</span>
+                    </label>
+                  </div>
+                  <pre className="text-xs overflow-auto">{JSON.stringify(responseBodyView, null, 2)}</pre>
                 </Section>
                 <Section title="Headers">
                   <pre className="text-xs overflow-auto">{JSON.stringify(detail.response.headers ?? {}, null, 2)}</pre>
@@ -398,9 +472,10 @@ function TokenFlowDialog(props: {
             </div>
           )}
           {tokenFlow?.eligible && (
-            <TokenFlowSankey
-              tokenFlow={tokenFlow}
-            />
+            <div className="relative">
+              <CopyMermaidButton code={toMermaidSankey(tokenFlow)} />
+              <TokenFlowSankey tokenFlow={tokenFlow} />
+            </div>
           )}
         </Dialog.Content>
       </Dialog.Portal>
@@ -717,6 +792,45 @@ function buildCalendarGrid(month: string, days: CaptureCalendarDaySummary[]) {
   return cells
 }
 
+function buildAggregatedResponseBody(detail: CaptureRecordDetail): unknown {
+  const body = detail.response.body ?? null
+  if (!body || typeof body !== 'object') return body
+  const responseRecord = body as Record<string, unknown>
+  if (responseRecord.$type !== 'stream') {
+    return body
+  }
+
+  const timeline = detail.analysis.responseTimeline ?? []
+  const streamPreview = timeline.find((entry) => entry.kind === 'stream_preview')?.content ?? ''
+  const toolCalls = timeline
+    .filter((entry) => entry.kind === 'tool_call')
+    .map((entry) => ({
+      id: entry.toolCallId,
+      type: String(entry.metadata?.type ?? 'function'),
+      function: {
+        name: entry.name ?? '',
+        arguments: entry.arguments ?? '',
+      },
+    }))
+  const errors = timeline
+    .filter((entry) => entry.kind === 'error')
+    .map((entry) => ({
+      content: entry.content ?? '',
+      metadata: entry.metadata ?? null,
+    }))
+
+  return {
+    $type: 'stream_aggregated',
+    content: streamPreview,
+    tool_calls: toolCalls,
+    errors,
+    stream: {
+      contentType: responseRecord.contentType ?? null,
+      bytes: responseRecord.bytes ?? null,
+    },
+  }
+}
+
 function prevMonth(month: string): string {
   if (!month) return new Date().toISOString().slice(0, 7)
   const [year, mon] = month.split('-').map(Number)
@@ -743,6 +857,28 @@ function routeType(route: string): string {
   if (route.includes('/images/')) return 'images'
   if (route.includes('/audio/')) return 'audio'
   return 'other'
+}
+
+function getBrowserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+
+function formatDateForTimeZone(value: Date, timeZone: string): string {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const parts = formatter.formatToParts(value)
+  const year = parts.find((part) => part.type === 'year')?.value ?? '0000'
+  const month = parts.find((part) => part.type === 'month')?.value ?? '00'
+  const day = parts.find((part) => part.type === 'day')?.value ?? '00'
+  return `${year}-${month}-${day}`
 }
 
 function routeTone(route: string): string {

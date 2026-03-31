@@ -22,6 +22,7 @@ export async function registerStatsRoutes(
   // GET /admin/stats - aggregated statistics
   app.get("/admin/stats", async (req: FastifyRequest<{ Querystring: StatsQuery }>, reply: FastifyReply) => {
     const windowMs = parseWindow(req.query.window ?? "24h");
+    const timeZone = normalizeTimeZone(req.query.timeZone);
     
     if (windowMs === null) {
       reply.code(400).send({ 
@@ -34,7 +35,10 @@ export async function registerStatsRoutes(
 
     try {
       const stats = await aggregateStats(paths, windowMs);
-      reply.send(stats);
+      reply.send({
+        ...stats,
+        timeZone,
+      });
     } catch (error) {
       app.log.error({ error }, "Failed to aggregate stats");
       reply.code(500).send({ error: { message: "Failed to retrieve statistics" } });
@@ -72,6 +76,7 @@ export async function registerStatsRoutes(
   // GET /admin/stats/latency - latency distribution
   app.get("/admin/stats/latency", async (req: FastifyRequest<{ Querystring: StatsQuery }>, reply: FastifyReply) => {
     const windowMs = parseWindow(req.query.window ?? "7d");
+    const timeZone = normalizeTimeZone(req.query.timeZone);
 
     if (windowMs === null) {
       reply.code(400).send({ error: { message: "Invalid window format" } });
@@ -86,6 +91,7 @@ export async function registerStatsRoutes(
       if (latencies.length === 0) {
         reply.send({ 
           window,
+          timeZone,
           count: 0,
           min: null,
           max: null,
@@ -123,6 +129,7 @@ export async function registerStatsRoutes(
 
       reply.send({
         window,
+        timeZone,
         count: latencies.length,
         min: latencies[0],
         max: latencies[latencies.length - 1],

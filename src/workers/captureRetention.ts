@@ -1,6 +1,8 @@
 import { StoragePaths } from "../storage/files";
 import { runCaptureRetention } from "../storage/captureRepository";
 
+let retentionTimer: NodeJS.Timeout | null = null;
+
 export function startCaptureRetentionWorker(paths: StoragePaths): void {
   const run = async () => {
     try {
@@ -10,6 +12,14 @@ export function startCaptureRetentionWorker(paths: StoragePaths): void {
     }
   };
 
-  setInterval(run, 10 * 60 * 1000).unref();
+  retentionTimer = setInterval(run, 10 * 60 * 1000);
+  retentionTimer.unref();
   void run();
+}
+
+export function stopCaptureRetentionWorker(): void {
+  if (retentionTimer) {
+    clearInterval(retentionTimer);
+    retentionTimer = null;
+  }
 }

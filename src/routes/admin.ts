@@ -471,26 +471,29 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
   );
 
   app.get("/admin/capture/records", async (req, reply) => {
-    const query = req.query as { limit?: string; offset?: string; date?: string } | undefined;
+    const query = req.query as { limit?: string; offset?: string; date?: string; timeZone?: string } | undefined;
     const parsed = Number(query?.limit);
     const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(50, Math.floor(parsed))) : 5;
     const offsetParsed = Number(query?.offset);
     const offset = Number.isFinite(offsetParsed) ? Math.max(0, Math.floor(offsetParsed)) : 0;
+    const timeZone = normalizeTimeZone(query?.timeZone);
     const result = await listCaptureRecords(paths, {
       limit,
       offset,
       date: typeof query?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(query.date) ? query.date : undefined,
+      timeZone,
     });
     reply.send({ object: "list", data: result.data, total: result.total });
   });
 
   app.get("/admin/capture/calendar", async (req, reply) => {
-    const query = req.query as { month?: string } | undefined;
+    const query = req.query as { month?: string; timeZone?: string } | undefined;
+    const timeZone = normalizeTimeZone(query?.timeZone);
     const month =
       typeof query?.month === "string" && /^\d{4}-\d{2}$/.test(query.month)
         ? query.month
-        : new Date().toISOString().slice(0, 7);
-    const days = await getCaptureCalendarMonth(paths, month);
+        : formatDateForTimeZone(new Date(), timeZone).slice(0, 7);
+    const days = await getCaptureCalendarMonth(paths, month, timeZone);
     reply.send({ month, days });
   });
 
@@ -524,4 +527,28 @@ function isAuthorized(req: FastifyRequest, token?: string): boolean {
   }
   const remote = req.socket.remoteAddress ?? "";
   return remote === "127.0.0.1" || remote === "::1";
+}
+
+function formatDateForTimeZone(value: Date, timeZone: string): string {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(value);
+  const year = parts.find((part) => part.type === "year")?.value ?? "0000";
+  const month = parts.find((part) => part.type === "month")?.value ?? "00";
+  const day = parts.find((part) => part.type === "day")?.value ?? "00";
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeTimeZone(input: string | undefined): string {
+  if (!input) return "UTC";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: input });
+    return input;
+  } catch {
+    return "UTC";
+  }
 }

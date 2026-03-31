@@ -17,10 +17,10 @@ waypoi bench
 waypoi bench --list-examples
 
 # Run one example
-waypoi bench --example showcase-agent-tool-call
+waypoi bench --example showcase-tinyqa-001
 
 # Pin a model for a showcase example
-waypoi bench --suite showcase --example showcase-responses-basic --model smart
+waypoi bench --suite showcase --example showcase-tinyqa-001 --model smart
 
 # Run a diagnostic suite
 waypoi bench --mode diagnostic --suite pool_smoke
@@ -49,14 +49,13 @@ waypoi bench --mode diagnostic --baseline ~/.config/waypoi/benchmarks/bench-2026
 
 ## Showcase examples
 
-The `showcase` suite is the release-facing path. It is built from Opencode-style real usage:
+The `showcase` suite is the release-facing path. It is built from Hugging Face
+dataset `vincentkoc/tiny_qa_benchmark` (train split):
 
-- plain chat completion
-- `/v1/responses` compatibility
-- agent tool calling
-- multi-step agent loop
-- image generation
-- audio + text turn
+- 52 single-question QA prompts
+- chat-mode single-turn runs
+- per-question answer checks via `contains`
+- category/difficulty metadata exposed as expected highlights
 
 Showcase behavior:
 

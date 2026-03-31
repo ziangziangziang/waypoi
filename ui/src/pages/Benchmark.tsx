@@ -51,7 +51,17 @@ type ShowcaseExchange = {
   responsePayload: unknown
 }
 
-const SUITES = ['showcase', 'smoke', 'proxy', 'agent', 'pool_smoke', 'omni_call_smoke', 'capabilities']
+const SHOWCASE_SUITE = 'showcase'
+const DIAGNOSTIC_SUITES = ['smoke', 'proxy', 'agent', 'pool_smoke', 'omni_call_smoke', 'capabilities']
+const SUITE_LABELS: Record<string, string> = {
+  showcase: 'Showcase',
+  smoke: 'Smoke',
+  proxy: 'Proxy',
+  agent: 'Agent',
+  pool_smoke: 'Pool Smoke',
+  omni_call_smoke: 'Omni Call Smoke',
+  capabilities: 'Capabilities',
+}
 const PROFILES = ['local', 'ci']
 
 export function Benchmark() {
@@ -212,10 +222,10 @@ export function Benchmark() {
     setStarting(true)
     setError(null)
     try {
-      const executionMode = suite === 'showcase' ? 'showcase' : 'diagnostic'
+      const executionMode = isShowcase ? 'showcase' : 'diagnostic'
       const run = await startBenchmarkRun({
         suite,
-        exampleId: suite === 'showcase' && selectedExampleId ? selectedExampleId : undefined,
+        exampleId: isShowcase && selectedExampleId ? selectedExampleId : undefined,
         profile,
         scenarioPath: scenarioPath.trim() || undefined,
         modelOverride: selectedModel || undefined,
@@ -290,6 +300,12 @@ export function Benchmark() {
     }))
   }, [activeScenarioDetail, events, showRaw])
 
+  const isShowcase = suite === SHOWCASE_SUITE
+  const selectedExample = useMemo(
+    () => examples.find((example) => example.id === selectedExampleId) ?? null,
+    [examples, selectedExampleId]
+  )
+
   return (
     <div className="flex-1 flex flex-col h-full min-h-0">
       <header className="sticky top-0 z-20 h-14 border-b border-border bg-background/95 backdrop-blur flex items-center px-6 gap-4 shrink-0">
@@ -309,50 +325,81 @@ export function Benchmark() {
         <aside className="border-r border-border p-4 space-y-4 overflow-auto">
           <div className="panel">
             <div className="panel-header">
-              <span className="panel-title">Run Example</span>
+              <span className="panel-title">Run Setup</span>
             </div>
             <div className="p-3 space-y-3">
               <label className="text-xs text-muted-foreground block">
-                Benchmark Path
+                Run Mode
                 <select
                   className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                  value={suite}
-                  onChange={(event) => setSuite(event.target.value)}
+                  value={isShowcase ? 'showcase' : 'diagnostic'}
+                  onChange={(event) => {
+                    if (event.target.value === 'showcase') {
+                      setSuite(SHOWCASE_SUITE)
+                      return
+                    }
+                    if (suite === SHOWCASE_SUITE) {
+                      setSuite(DIAGNOSTIC_SUITES[0])
+                    }
+                  }}
                 >
-                  {SUITES.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
+                  <option value="showcase">Showcase</option>
+                  <option value="diagnostic">Diagnostic</option>
                 </select>
               </label>
 
-              {suite === 'showcase' && (
+              {isShowcase ? (
+                <div className="rounded border border-border/70 bg-secondary/20 p-2">
+                  <p className="text-2xs uppercase text-muted-foreground">Question Source</p>
+                  <p className="text-xs font-mono">vincentkoc/tiny_qa_benchmark (Hugging Face)</p>
+                </div>
+              ) : (
                 <label className="text-xs text-muted-foreground block">
-                  Example
+                  Diagnostic Suite
+                  <select
+                    className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                    value={suite}
+                    onChange={(event) => setSuite(event.target.value)}
+                  >
+                    {DIAGNOSTIC_SUITES.map((item) => (
+                      <option key={item} value={item}>{SUITE_LABELS[item]}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {isShowcase && (
+                <label className="text-xs text-muted-foreground block">
+                  Question
                   <select
                     className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
                     value={selectedExampleId}
                     onChange={(event) => setSelectedExampleId(event.target.value)}
                   >
                     {examples.map((example) => (
-                      <option key={example.id} value={example.id}>{example.title}</option>
+                      <option key={example.id} value={example.id}>
+                        {example.title}
+                      </option>
                     ))}
                     {examples.length === 0 && <option value="">No examples</option>}
                   </select>
                 </label>
               )}
 
-              <label className="text-xs text-muted-foreground block">
-                Profile
-                <select
-                  className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                  value={profile}
-                  onChange={(event) => setProfile(event.target.value)}
-                >
-                  {PROFILES.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </label>
+              {!isShowcase && (
+                <label className="text-xs text-muted-foreground block">
+                  Profile
+                  <select
+                    className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                    value={profile}
+                    onChange={(event) => setProfile(event.target.value)}
+                  >
+                    {PROFILES.map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               <label className="text-xs text-muted-foreground block">
                 Model Override
@@ -369,24 +416,24 @@ export function Benchmark() {
               </label>
 
               <label className="text-xs text-muted-foreground block">
-                Custom Scenario File
+                Scenario File (Optional)
                 <input
                   className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
                   value={scenarioPath}
                   onChange={(event) => setScenarioPath(event.target.value)}
-                  placeholder="optional"
+                  placeholder="./examples/scenarios/custom.yaml"
                 />
               </label>
 
               <p className="text-2xs text-muted-foreground">
-                {suite === 'showcase'
-                  ? 'Showcase runs a single visible replay so the user can inspect the exact exchange.'
-                  : 'Diagnostic suites keep the older benchmark behavior and capability matrix.'}
+                {isShowcase
+                  ? `Showcase runs one Tiny QA question at a time. Expected answer: ${selectedExample?.successCriteria ?? 'n/a'}`
+                  : 'Diagnostic suites keep pass-rate, latency, and capability diagnostics.'}
               </p>
 
-              <Button className="w-full" onClick={startRun} disabled={starting || (suite === 'showcase' && !selectedExampleId)}>
+              <Button className="w-full" onClick={startRun} disabled={starting || (isShowcase && !selectedExampleId)}>
                 {starting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-                Start
+                {isShowcase ? 'Run Showcase' : 'Run Diagnostic'}
               </Button>
               {error && <p className="text-xs text-destructive">{error}</p>}
             </div>

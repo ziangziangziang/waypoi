@@ -120,6 +120,93 @@ test("admin capture endpoints expose config, list, and detail", async () => {
   await app.close();
 });
 
+test("admin capture endpoints bucket calendar and date by requested timezone with UTC fallback", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-admin-timezone-test-");
+  const paths = makePaths(baseDir);
+  const app = Fastify();
+  await registerAdminRoutes(app, paths, { adminToken: "test-token", version: "0.0.0" });
+
+  const auth = { authorization: "Bearer test-token" };
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const record = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 15,
+    requestBody: { model: "prov/model", messages: [{ role: "user", content: "hello" }] },
+    responseBody: { id: "resp-1" },
+  });
+  assert.ok(record);
+
+  const indexPath = path.join(baseDir, "capture", "index.jsonl");
+  const lines = (await fs.readFile(indexPath, "utf8")).split("\n").filter(Boolean);
+  const patched = lines.map((line) => {
+    const entry = JSON.parse(line) as { id: string; timestamp: string };
+    if (entry.id === record!.id) {
+      entry.timestamp = "2026-01-01T01:30:00.000Z";
+    }
+    return JSON.stringify(entry);
+  });
+  await fs.writeFile(indexPath, `${patched.join("\n")}\n`, "utf8");
+
+  const utcRecords = await app.inject({
+    method: "GET",
+    url: "/admin/capture/records?date=2026-01-01&timeZone=UTC&limit=5&offset=0",
+    headers: auth,
+  });
+  assert.equal(utcRecords.statusCode, 200);
+  assert.equal((utcRecords.json() as { total: number }).total, 1);
+
+  const chicagoRecords = await app.inject({
+    method: "GET",
+    url: "/admin/capture/records?date=2025-12-31&timeZone=America/Chicago&limit=5&offset=0",
+    headers: auth,
+  });
+  assert.equal(chicagoRecords.statusCode, 200);
+  assert.equal((chicagoRecords.json() as { total: number }).total, 1);
+
+  const invalidTzRecords = await app.inject({
+    method: "GET",
+    url: "/admin/capture/records?date=2026-01-01&timeZone=Not/A_Zone&limit=5&offset=0",
+    headers: auth,
+  });
+  assert.equal(invalidTzRecords.statusCode, 200);
+  assert.equal((invalidTzRecords.json() as { total: number }).total, 1);
+
+  const utcCalendar = await app.inject({
+    method: "GET",
+    url: "/admin/capture/calendar?month=2026-01&timeZone=UTC",
+    headers: auth,
+  });
+  assert.equal(utcCalendar.statusCode, 200);
+  assert.deepEqual((utcCalendar.json() as { days: Array<{ date: string; count: number }> }).days, [
+    { date: "2026-01-01", count: 1 },
+  ]);
+
+  const chicagoCalendar = await app.inject({
+    method: "GET",
+    url: "/admin/capture/calendar?month=2025-12&timeZone=America/Chicago",
+    headers: auth,
+  });
+  assert.equal(chicagoCalendar.statusCode, 200);
+  assert.deepEqual((chicagoCalendar.json() as { days: Array<{ date: string; count: number }> }).days, [
+    { date: "2025-12-31", count: 1 },
+  ]);
+
+  const invalidTzCalendar = await app.inject({
+    method: "GET",
+    url: "/admin/capture/calendar?month=2026-01&timeZone=Not/A_Zone",
+    headers: auth,
+  });
+  assert.equal(invalidTzCalendar.statusCode, 200);
+  assert.deepEqual((invalidTzCalendar.json() as { days: Array<{ date: string; count: number }> }).days, [
+    { date: "2026-01-01", count: 1 },
+  ]);
+
+  await app.close();
+});
+
 test("admin provider endpoints support provider-level CRUD", async () => {
   const baseDir = await makeWorkspaceTempDir("waypoi-provider-admin-test-");
   const paths = makePaths(baseDir);

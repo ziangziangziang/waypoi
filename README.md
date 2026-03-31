@@ -329,12 +329,15 @@ waypoi models set-key pcai/gpt-4o --api-key <key>|--env-var <ENV>
 # Benchmark showcase
 waypoi bench                               # Default live showcase example suite
 waypoi bench --list-examples               # List showcase examples
-waypoi bench --example showcase-agent-tool-call
+waypoi bench --example showcase-tinyqa-001
 waypoi bench --suite showcase --model smart
 waypoi bench --scenario file.json          # File-driven scenarios
 waypoi bench --mode diagnostic --suite pool_smoke
 waypoi bench --baseline ./bench-prev.json
 ```
+
+Benchmark showcase examples are sourced from Hugging Face dataset
+`vincentkoc/tiny_qa_benchmark` (train split, 52 QA prompts).
 
 Provider credentials imported with `waypoi providers import -f .env` are stored in plaintext at
 `$WAYPOI_DIR/providers.json` by design for local operation.

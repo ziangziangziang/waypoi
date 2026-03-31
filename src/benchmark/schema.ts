@@ -252,8 +252,8 @@ function optionalExampleSource(
   if (!parsed) {
     return undefined;
   }
-  if (parsed !== "opencode" && parsed !== "builtin" && parsed !== "file") {
-    throw new Error(`${field}: expected 'opencode', 'builtin', or 'file'.`);
+  if (parsed !== "opencode" && parsed !== "builtin" && parsed !== "file" && parsed !== "huggingface") {
+    throw new Error(`${field}: expected 'opencode', 'builtin', 'file', or 'huggingface'.`);
   }
   return parsed;
 }

@@ -132,6 +132,7 @@ function firstSelectableModelId(models: Model[]): string {
 const MAX_TOOL_ITERATIONS = 10
 
 export function AgentPlayground() {
+  const MAX_INPUT_LINES = 10
   // Session state
   const [sessions, setSessions] = useState<SessionListItem[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -194,7 +195,20 @@ export function AgentPlayground() {
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const recordingTimerRef = useRef<number | null>(null)
   const callAudioRef = useRef<HTMLAudioElement | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const pendingAutoTitleRef = useRef<{ sessionId: string; seedText: string } | null>(null)
+
+  const resizeInput = useCallback(() => {
+    const textarea = inputRef.current
+    if (!textarea) return
+
+    textarea.style.height = 'auto'
+    const lineHeight = Number.parseFloat(window.getComputedStyle(textarea).lineHeight) || 20
+    const maxHeight = lineHeight * MAX_INPUT_LINES
+    const nextHeight = Math.min(textarea.scrollHeight, maxHeight)
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+  }, [MAX_INPUT_LINES])
 
   // Load models on mount
   useEffect(() => {
@@ -240,6 +254,10 @@ export function AgentPlayground() {
       loadTools()
     }
   }, [agentModeEnabled])
+
+  useEffect(() => {
+    resizeInput()
+  }, [input, resizeInput])
 
   const loadTools = async () => {
     try {
@@ -1395,12 +1413,12 @@ export function AgentPlayground() {
                   )}
                   <div
                     className={cn(
-                      'max-w-[70%] rounded-lg px-4 py-3',
+                      'rounded-lg px-4 py-3',
                       message.role === 'user'
-                        ? 'bg-primary/10 border border-primary/20'
+                        ? 'max-w-[70%] bg-primary/10 border border-primary/20'
                         : message.role === 'tool'
-                        ? 'bg-amber-500/5 border border-amber-500/20'
-                        : 'bg-secondary border border-border'
+                        ? 'max-w-[70%] bg-amber-500/5 border border-amber-500/20'
+                        : 'w-full sm:w-[70%] max-w-[75ch] bg-secondary border border-border'
                     )}
                   >
                     {/* Render explicitly attached images */}
@@ -1602,6 +1620,7 @@ export function AgentPlayground() {
                   </Button>
                 )}
                 <Textarea
+                  ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
@@ -1613,7 +1632,7 @@ export function AgentPlayground() {
                       ? 'Ask me anything... (agent mode enabled)'
                       : 'Type a message... (paste or drop images)'
                   }
-                  className="min-h-[44px] max-h-32"
+                  className="min-h-[44px] leading-5"
                   rows={1}
                 />
                 {isLoading && callModeEnabled ? (

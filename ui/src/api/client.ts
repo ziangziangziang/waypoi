@@ -297,6 +297,7 @@ export async function listModels(options?: { availableOnly?: boolean }): Promise
 
 export interface StatsAggregation {
   window: string;
+  timeZone?: string;
   total: number;
   success: number;
   errors: number;
@@ -310,13 +311,16 @@ export interface StatsAggregation {
   byEndpoint: Record<string, { count: number; avgLatencyMs: number; tokens: number; errors: number }>;
 }
 
-export async function getStats(window: string = '24h'): Promise<StatsAggregation> {
-  const response = await fetch(`${API_BASE}/admin/stats?window=${window}`);
+export async function getStats(window: string = '24h', options?: { timeZone?: string }): Promise<StatsAggregation> {
+  const params = new URLSearchParams({ window });
+  if (options?.timeZone) params.set('timeZone', options.timeZone);
+  const response = await fetch(`${API_BASE}/admin/stats?${params.toString()}`);
   return handleResponse<StatsAggregation>(response);
 }
 
 export interface LatencyDistribution {
   window: string;
+  timeZone?: string;
   count: number;
   min: number | null;
   max: number | null;
@@ -327,8 +331,10 @@ export interface LatencyDistribution {
   histogram: Record<string, number>;
 }
 
-export async function getLatencyDistribution(window: string = '7d'): Promise<LatencyDistribution> {
-  const response = await fetch(`${API_BASE}/admin/stats/latency?window=${window}`);
+export async function getLatencyDistribution(window: string = '7d', options?: { timeZone?: string }): Promise<LatencyDistribution> {
+  const params = new URLSearchParams({ window });
+  if (options?.timeZone) params.set('timeZone', options.timeZone);
+  const response = await fetch(`${API_BASE}/admin/stats/latency?${params.toString()}`);
   return handleResponse<LatencyDistribution>(response);
 }
 
@@ -845,7 +851,7 @@ export interface BenchmarkExampleSummary {
   title: string
   summary: string
   userVisibleGoal: string
-  exampleSource: 'opencode' | 'builtin' | 'file'
+  exampleSource: 'opencode' | 'builtin' | 'file' | 'huggingface'
   inputPreview: string
   successCriteria: string
   expectedHighlights: string[]
@@ -1357,12 +1363,13 @@ export async function updateCaptureConfig(
 }
 
 export async function listCaptureRecords(
-  options: { limit?: number; offset?: number; date?: string } = {}
+  options: { limit?: number; offset?: number; date?: string; timeZone?: string } = {}
 ): Promise<{ object: 'list'; data: CaptureRecordSummary[]; total: number }> {
   const params = new URLSearchParams()
   if (options.limit !== undefined) params.set('limit', String(options.limit))
   if (options.offset !== undefined) params.set('offset', String(options.offset))
   if (options.date) params.set('date', options.date)
+  if (options.timeZone) params.set('timeZone', options.timeZone)
   const response = await fetch(`${API_BASE}/admin/capture/records?${params.toString()}`);
   return handleResponse<{ object: 'list'; data: CaptureRecordSummary[]; total: number }>(response);
 }
@@ -1373,8 +1380,11 @@ export async function getCaptureRecord(id: string): Promise<CaptureRecordDetail>
 }
 
 export async function getCaptureCalendar(
-  month: string
+  month: string,
+  options: { timeZone?: string } = {}
 ): Promise<{ month: string; days: CaptureCalendarDaySummary[] }> {
-  const response = await fetch(`${API_BASE}/admin/capture/calendar?month=${encodeURIComponent(month)}`);
+  const params = new URLSearchParams({ month })
+  if (options.timeZone) params.set('timeZone', options.timeZone)
+  const response = await fetch(`${API_BASE}/admin/capture/calendar?${params.toString()}`);
   return handleResponse<{ month: string; days: CaptureCalendarDaySummary[] }>(response);
 }

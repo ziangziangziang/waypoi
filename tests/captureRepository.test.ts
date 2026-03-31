@@ -11,6 +11,7 @@ import {
 } from "../src/middleware/requestCapture";
 import {
   ensureCaptureStore,
+  getCaptureCalendarMonth,
   getCaptureConfig,
   listCaptureRecords,
   persistCaptureRecord,
@@ -185,6 +186,52 @@ test("capture list prunes stale index entries whose record files are missing", a
   assert.doesNotMatch(rewrittenIndex, new RegExp(first!.id));
 });
 
+test("capture day bucketing follows requested timezone with UTC fallback", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-timezone-buckets-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const record = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 8,
+    requestBody: { model: "prov/model", messages: [{ role: "user", content: "hello" }] },
+    responseBody: { id: "resp-1" },
+  });
+  assert.ok(record);
+
+  const indexPath = path.join(baseDir, "capture", "index.jsonl");
+  const lines = (await fs.readFile(indexPath, "utf8")).split("\n").filter(Boolean);
+  const patched = lines.map((line) => {
+    const entry = JSON.parse(line) as { id: string; timestamp: string };
+    if (entry.id === record!.id) {
+      entry.timestamp = "2026-01-01T01:30:00.000Z";
+    }
+    return JSON.stringify(entry);
+  });
+  await fs.writeFile(indexPath, `${patched.join("\n")}\n`, "utf8");
+
+  const utcList = await listCaptureRecords(paths, { date: "2026-01-01", timeZone: "UTC", limit: 5 });
+  assert.equal(utcList.total, 1);
+  const chicagoList = await listCaptureRecords(paths, { date: "2025-12-31", timeZone: "America/Chicago", limit: 5 });
+  assert.equal(chicagoList.total, 1);
+  const chicagoWrongDay = await listCaptureRecords(paths, { date: "2026-01-01", timeZone: "America/Chicago", limit: 5 });
+  assert.equal(chicagoWrongDay.total, 0);
+
+  const fallbackList = await listCaptureRecords(paths, { date: "2026-01-01", timeZone: "Not/A_Zone", limit: 5 });
+  assert.equal(fallbackList.total, 1);
+
+  const utcCalendar = await getCaptureCalendarMonth(paths, "2026-01", "UTC");
+  assert.deepEqual(utcCalendar, [{ date: "2026-01-01", count: 1 }]);
+  const chicagoCalendar = await getCaptureCalendarMonth(paths, "2025-12", "America/Chicago");
+  assert.deepEqual(chicagoCalendar, [{ date: "2025-12-31", count: 1 }]);
+  const fallbackCalendar = await getCaptureCalendarMonth(paths, "2026-01", "Not/A_Zone");
+  assert.deepEqual(fallbackCalendar, [{ date: "2026-01-01", count: 1 }]);
+});
+
 test("streamed capture persists routing, headers, and response timeline before onResponse", async () => {
   const baseDir = await makeWorkspaceTempDir("waypoi-capture-stream-");
   const paths = makePaths(baseDir);
@@ -322,6 +369,387 @@ test("capture token flow falls back to estimated mode without usage", async () =
   assert.ok((persisted?.analysis.tokenFlow.totals.totalTokens ?? 0) > 0);
   assert.ok((persisted?.analysis.tokenFlow.input.find((item) => item.key === "unattributed_input")?.tokens ?? 0) >= 0);
   assert.ok((persisted?.analysis.tokenFlow.output.find((item) => item.key === "assistant_text")?.tokens ?? 0) >= 0);
+});
+
+test("capture token flow stream output uses extracted SSE text instead of raw payload size", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-token-flow-stream-extracted-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const huge = "A".repeat(20000);
+  const sse = [
+    "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}",
+    "",
+    `data: {\"attachments\":[{\"b64_json\":\"${huge}\"}]}`,
+    "",
+  ].join("\n");
+
+  const persisted = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 77,
+    requestBody: {
+      messages: [{ role: "user", content: "brief reply please" }],
+    },
+    responseBody: {
+      $type: "stream",
+      contentType: "text/event-stream",
+      bytes: Buffer.byteLength(sse),
+      text: sse,
+    },
+  });
+
+  assert.ok(persisted);
+  const assistantText = persisted?.analysis.tokenFlow.output.find((item) => item.key === "assistant_text")?.tokens ?? 0;
+  const unattributedOutput = persisted?.analysis.tokenFlow.output.find((item) => item.key === "unattributed_output")?.tokens ?? 0;
+  assert.equal(assistantText, 1);
+  assert.equal(unattributedOutput, 0);
+  assert.ok(
+    (persisted?.analysis.tokenFlow.notes ?? []).some((note) =>
+      note.includes("timeline-equivalent SSE text")
+    )
+  );
+});
+
+test("capture token flow stream output ignores non-text SSE metadata when useful text exists", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-token-flow-stream-mixed-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const huge = "Z".repeat(12000);
+  const useful = "hello reason";
+  const sse = [
+    "data: {\"choices\":[{\"delta\":{\"content\":\"hello \"}}]}",
+    "",
+    "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"reason\"}}]}",
+    "",
+    `data: {\"image\":{\"b64_json\":\"${huge}\"}}`,
+    "",
+  ].join("\n");
+
+  const persisted = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 66,
+    requestBody: {
+      messages: [{ role: "user", content: "mixed stream test" }],
+    },
+    responseBody: {
+      $type: "stream",
+      contentType: "text/event-stream",
+      bytes: Buffer.byteLength(sse),
+      text: sse,
+    },
+  });
+
+  assert.ok(persisted);
+  const expected = Math.ceil(Buffer.byteLength(useful, "utf8") / 4);
+  const assistantText = persisted?.analysis.tokenFlow.output.find((item) => item.key === "assistant_text")?.tokens ?? 0;
+  const unattributedOutput = persisted?.analysis.tokenFlow.output.find((item) => item.key === "unattributed_output")?.tokens ?? 0;
+  assert.equal(assistantText, expected);
+  assert.equal(unattributedOutput, 0);
+});
+
+test("capture token flow stream output attributes both assistant_text and tool_calls", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-token-flow-stream-text-and-tools-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const sse = [
+    "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}",
+    "",
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"task\",\"arguments\":\"{\\\"prompt\\\":\\\"hello\\\"}\"}}]}}]}",
+    "",
+  ].join("\n");
+
+  const persisted = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 63,
+    requestBody: {
+      messages: [{ role: "user", content: "run task then answer" }],
+    },
+    responseBody: {
+      $type: "stream",
+      contentType: "text/event-stream",
+      bytes: Buffer.byteLength(sse),
+      text: sse,
+    },
+  });
+
+  assert.ok(persisted);
+  const assistantText = persisted?.analysis.tokenFlow.output.find((item) => item.key === "assistant_text")?.tokens ?? 0;
+  const toolCalls = persisted?.analysis.tokenFlow.output.find((item) => item.key === "tool_calls")?.tokens ?? 0;
+  assert.ok(assistantText > 0);
+  assert.ok(toolCalls > 0);
+  assert.ok(
+    (persisted?.analysis.tokenFlow.notes ?? []).some((note) =>
+      note.includes("timeline-equivalent SSE text and reconstructed streamed tool-call deltas")
+    )
+  );
+});
+
+test("capture token flow stream output attributes tool_calls without fallback when stream has no assistant text", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-token-flow-stream-tools-only-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const sse = [
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"task\",\"arguments\":\"{\"}}]}}]}",
+    "",
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"prompt\\\":\\\"hello\\\"}\"}}]}}]}",
+    "",
+  ].join("\n");
+
+  const persisted = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 52,
+    requestBody: {
+      messages: [{ role: "user", content: "call tool only" }],
+    },
+    responseBody: {
+      $type: "stream",
+      contentType: "text/event-stream",
+      bytes: Buffer.byteLength(sse),
+      text: sse,
+    },
+  });
+
+  assert.ok(persisted);
+  const assistantText = persisted?.analysis.tokenFlow.output.find((item) => item.key === "assistant_text")?.tokens ?? 0;
+  const toolCalls = persisted?.analysis.tokenFlow.output.find((item) => item.key === "tool_calls")?.tokens ?? 0;
+  const unattributedOutput = persisted?.analysis.tokenFlow.output.find((item) => item.key === "unattributed_output")?.tokens ?? 0;
+  assert.equal(assistantText, 0);
+  assert.ok(toolCalls > 0);
+  assert.equal(unattributedOutput, 0);
+  assert.ok(
+    (persisted?.analysis.tokenFlow.notes ?? []).some((note) =>
+      note.includes("reconstructed streamed tool-call deltas")
+    )
+  );
+  assert.ok(
+    (persisted?.analysis.tokenFlow.notes ?? []).every((note) =>
+      !note.includes("fallback uses merged SSE event payload text")
+    )
+  );
+});
+
+test("capture token flow stream output falls back to merged event payload when no text or tool calls are extractable", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-token-flow-stream-fallback-only-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const sse = [
+    "data: {\"event\":\"metadata\",\"blob\":{\"id\":\"abc\",\"size\":2048}}",
+    "",
+    "data: {\"event\":\"stats\",\"dur_ms\":15}",
+    "",
+  ].join("\n");
+
+  const persisted = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 41,
+    requestBody: {
+      messages: [{ role: "user", content: "metadata only stream" }],
+    },
+    responseBody: {
+      $type: "stream",
+      contentType: "text/event-stream",
+      bytes: Buffer.byteLength(sse),
+      text: sse,
+    },
+  });
+
+  assert.ok(persisted);
+  const assistantText = persisted?.analysis.tokenFlow.output.find((item) => item.key === "assistant_text")?.tokens ?? 0;
+  const toolCalls = persisted?.analysis.tokenFlow.output.find((item) => item.key === "tool_calls")?.tokens ?? 0;
+  const unattributedOutput = persisted?.analysis.tokenFlow.output.find((item) => item.key === "unattributed_output")?.tokens ?? 0;
+  assert.equal(assistantText, 0);
+  assert.equal(toolCalls, 0);
+  assert.ok(unattributedOutput > 0);
+  assert.ok(
+    (persisted?.analysis.tokenFlow.notes ?? []).some((note) =>
+      note.includes("fallback uses merged SSE event payload text")
+    )
+  );
+});
+
+test("streamed response timeline includes reconstructed tool_call entries from delta.tool_calls", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-stream-tool-calls-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const sse = [
+    "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}",
+    "",
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_123\",\"type\":\"function\",\"function\":{\"name\":\"task\",\"arguments\":\"{\"}}]}}]}",
+    "",
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"description\\\":\\\"Print\\\"\"}}]}}]}",
+    "",
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\",\\\"prompt\\\":\\\"Print hello\\\"}\"}}]}}]}",
+    "",
+    "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}",
+    "",
+  ].join("\n");
+
+  const persisted = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 12,
+    requestBody: {
+      messages: [{ role: "user", content: "use task tool" }],
+    },
+    responseBody: {
+      $type: "stream",
+      contentType: "text/event-stream",
+      bytes: Buffer.byteLength(sse),
+      text: sse,
+    },
+  });
+
+  assert.ok(persisted);
+  const responseTimeline = persisted?.analysis.responseTimeline ?? [];
+  assert.ok(responseTimeline.some((entry) => entry.kind === "stream_preview"));
+  const toolCalls = responseTimeline.filter((entry) => entry.kind === "tool_call");
+  assert.equal(toolCalls.length, 1);
+  assert.equal(toolCalls[0]?.name, "task");
+  assert.equal(toolCalls[0]?.toolCallId, "call_123");
+  assert.match(toolCalls[0]?.arguments ?? "", /"description":"Print"/);
+  assert.match(toolCalls[0]?.arguments ?? "", /"prompt":"Print hello"/);
+});
+
+test("streamed response timeline reconstructs multiple tool calls split across chunks", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-stream-multi-tool-calls-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const sse = [
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"task\",\"arguments\":\"{\"}},{\"index\":1,\"id\":\"call_b\",\"type\":\"function\",\"function\":{\"name\":\"task\",\"arguments\":\"{\"}}]}}]}",
+    "",
+    "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"description\\\":\\\"A\\\"}\"}},{\"index\":1,\"function\":{\"arguments\":\"\\\"description\\\":\\\"B\\\"}\"}}]}}]}",
+    "",
+  ].join("\n");
+
+  const persisted = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 10,
+    requestBody: {
+      messages: [{ role: "user", content: "two tools" }],
+    },
+    responseBody: {
+      $type: "stream",
+      contentType: "text/event-stream",
+      bytes: Buffer.byteLength(sse),
+      text: sse,
+    },
+  });
+
+  assert.ok(persisted);
+  const toolCalls = (persisted?.analysis.responseTimeline ?? []).filter((entry) => entry.kind === "tool_call");
+  assert.equal(toolCalls.length, 2);
+  assert.equal(toolCalls[0]?.toolCallId, "call_a");
+  assert.equal(toolCalls[1]?.toolCallId, "call_b");
+  assert.match(toolCalls[0]?.arguments ?? "", /"description":"A"/);
+  assert.match(toolCalls[1]?.arguments ?? "", /"description":"B"/);
+});
+
+test("streamed response timeline remains stream_preview-only when no tool calls are present", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-stream-no-tool-calls-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const sse = [
+    "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think\"}}]}",
+    "",
+    "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}",
+    "",
+  ].join("\n");
+
+  const persisted = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 14,
+    requestBody: {
+      messages: [{ role: "user", content: "no tool call" }],
+    },
+    responseBody: {
+      $type: "stream",
+      contentType: "text/event-stream",
+      bytes: Buffer.byteLength(sse),
+      text: sse,
+    },
+  });
+
+  assert.ok(persisted);
+  const responseTimeline = persisted?.analysis.responseTimeline ?? [];
+  assert.equal(responseTimeline.filter((entry) => entry.kind === "stream_preview").length, 1);
+  assert.equal(responseTimeline.filter((entry) => entry.kind === "tool_call").length, 0);
+});
+
+test("capture token flow assigns multimodal input to input_media bucket", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-capture-token-flow-media-");
+  const paths = makePaths(baseDir);
+
+  await ensureCaptureStore(paths);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const persisted = await persistCaptureRecord(paths, {
+    route: "/v1/chat/completions",
+    method: "POST",
+    statusCode: 200,
+    latencyMs: 28,
+    requestBody: {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Describe this image." },
+            { type: "image_url", image_url: { url: "https://example.com/a.png", detail: "high" } },
+          ],
+        },
+      ],
+    },
+    responseBody: {
+      usage: { prompt_tokens: 500, completion_tokens: 40, total_tokens: 540 },
+      choices: [{ message: { role: "assistant", content: "Done." } }],
+    },
+  });
+
+  assert.ok(persisted);
+  assert.equal(persisted?.analysis.tokenFlow.method, "exact_totals_estimated_categories");
+  assert.equal(persisted?.analysis.tokenFlow.totals.inputTokens, 500);
+  assert.equal(
+    persisted?.analysis.tokenFlow.input.reduce((sum, item) => sum + item.tokens, 0),
+    500
+  );
+  assert.ok((persisted?.analysis.tokenFlow.input.find((item) => item.key === "input_media")?.tokens ?? 0) > 0);
 });
 
 test("capture record hydration backfills token flow for legacy record shape", async () => {

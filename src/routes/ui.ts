@@ -77,6 +77,8 @@ export async function registerUiRoutes(app: FastifyInstance): Promise<void> {
       } catch {
         reply.code(404).send({ error: { message: "UI not found" } });
       }
+    } else if (req.url === "/" && req.headers.accept?.includes("text/html")) {
+      reply.redirect("/ui");
     } else {
       reply.code(404).send({ error: { message: "Not found" } });
     }

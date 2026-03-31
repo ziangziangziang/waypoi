@@ -68,16 +68,19 @@ test('stats routes honor exact 1h window across aggregate/latency/tokens', async
   assert.equal(statsRes.statusCode, 200)
   const statsJson = statsRes.json() as {
     window: string
+    timeZone: string
     total: number
     byEndpoint: Record<string, { count: number; errors: number }>
   }
   assert.equal(statsJson.window, '1h')
+  assert.equal(statsJson.timeZone, 'UTC')
   assert.equal(statsJson.total, 1)
 
   const latencyRes = await app.inject({ method: 'GET', url: '/admin/stats/latency?window=1h' })
   assert.equal(latencyRes.statusCode, 200)
-  const latencyJson = latencyRes.json() as { window: string; count: number }
+  const latencyJson = latencyRes.json() as { window: string; timeZone: string; count: number }
   assert.equal(latencyJson.window, '1h')
+  assert.equal(latencyJson.timeZone, 'UTC')
   assert.equal(latencyJson.count, 1)
 
   const tokenRes = await app.inject({ method: 'GET', url: '/admin/stats/tokens?window=1h' })
@@ -98,6 +101,37 @@ test('stats routes honor exact 1h window across aggregate/latency/tokens', async
   assert.equal(tokenJson.totalOutputTokens, 50)
   assert.equal(tokenJson.splitUnknownCount, 0)
   assert.equal(tokenJson.splitUnknownRate, 0)
+
+  await app.close()
+})
+
+test('stats and latency endpoints honor requested timezone with UTC fallback', async () => {
+  const baseDir = await makeWorkspaceTempDir('waypoi-stats-test-')
+  const paths = makePaths(baseDir)
+  const app = Fastify()
+  await registerStatsRoutes(app, paths)
+
+  await appendStats(paths, buildStat({ requestId: 'tz-meta', timestamp: new Date(), totalTokens: 10 }))
+
+  const localStatsRes = await app.inject({ method: 'GET', url: '/admin/stats?window=1h&timeZone=America/Chicago' })
+  assert.equal(localStatsRes.statusCode, 200)
+  const localStats = localStatsRes.json() as { timeZone: string }
+  assert.equal(localStats.timeZone, 'America/Chicago')
+
+  const invalidStatsRes = await app.inject({ method: 'GET', url: '/admin/stats?window=1h&timeZone=Not/A_Zone' })
+  assert.equal(invalidStatsRes.statusCode, 200)
+  const invalidStats = invalidStatsRes.json() as { timeZone: string }
+  assert.equal(invalidStats.timeZone, 'UTC')
+
+  const localLatencyRes = await app.inject({ method: 'GET', url: '/admin/stats/latency?window=1h&timeZone=America/Chicago' })
+  assert.equal(localLatencyRes.statusCode, 200)
+  const localLatency = localLatencyRes.json() as { timeZone: string }
+  assert.equal(localLatency.timeZone, 'America/Chicago')
+
+  const invalidLatencyRes = await app.inject({ method: 'GET', url: '/admin/stats/latency?window=1h&timeZone=Not/A_Zone' })
+  assert.equal(invalidLatencyRes.statusCode, 200)
+  const invalidLatency = invalidLatencyRes.json() as { timeZone: string }
+  assert.equal(invalidLatency.timeZone, 'UTC')
 
   await app.close()
 })

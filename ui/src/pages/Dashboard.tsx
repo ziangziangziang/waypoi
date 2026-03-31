@@ -44,17 +44,15 @@ export function Dashboard() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [timeWindow, setTimeWindow] = useState('24h')
   const [showAllModels, setShowAllModels] = useState(false)
-  const browserTimeZone = typeof Intl !== 'undefined'
-    ? Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-    : 'UTC'
+  const browserTimeZone = getBrowserTimeZone()
 
   const loadData = async () => {
     setIsLoading(true)
     setLoadError(null)
     try {
       const [statsData, latencyData, tokenData, providersData] = await Promise.all([
-        getStats(timeWindow),
-        getLatencyDistribution(timeWindow),
+        getStats(timeWindow, { timeZone: browserTimeZone }),
+        getLatencyDistribution(timeWindow, { timeZone: browserTimeZone }),
         getTokenUsage(timeWindow, { timeZone: browserTimeZone }),
         listProviderCatalog(),
       ])
@@ -503,6 +501,14 @@ function formatTokenBucketLabel(value: string): string {
 function formatTokenBucketTooltip(value: string, timeZone: string): string {
   const label = value.includes('T') ? `${value.replace('T', ' ')}` : value
   return `${label} (${timeZone})`
+}
+
+function getBrowserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
 }
 
 interface MetricCardProps {

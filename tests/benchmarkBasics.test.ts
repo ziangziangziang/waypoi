@@ -29,14 +29,15 @@ test('benchmark config defaults to showcase execution mode', async () => {
   assert.equal(resolved.defaults.maxIterations, 6)
 })
 
-test('showcase example catalog is opencode-backed and capability suite has no concurrent probes', () => {
+test('showcase example catalog is tiny-qa-backed and capability suite has no concurrent probes', () => {
   const suites = listBuiltInSuites()
   assert.ok(suites.includes('showcase'))
 
   const showcase = listSuiteExamples('showcase')
-  assert.ok(showcase.length >= 5)
-  assert.ok(showcase.every((example) => example.exampleSource === 'opencode'))
-  assert.ok(showcase.some((example) => example.id === 'showcase-agent-tool-call' && example.requiresAvailableTools))
+  assert.ok(showcase.length >= 50)
+  assert.ok(showcase.every((example) => example.exampleSource === 'huggingface'))
+  assert.ok(showcase.some((example) => example.id === 'showcase-tinyqa-001'))
+  assert.ok(showcase.every((example) => example.mode === 'chat'))
 
   const capabilityIds = listSuiteExamples('capabilities').map((example) => example.id)
   assert.ok(!capabilityIds.some((id) => id.includes('concurrent') || id.includes('under_load')))
@@ -51,7 +52,7 @@ test('scenario validation accepts showcase metadata, responses mode, and tool-na
         title: 'Responses Demo',
         summary: 'Compatibility example',
         userVisibleGoal: 'Show Responses API behavior',
-        exampleSource: 'opencode',
+        exampleSource: 'huggingface',
         inputPreview: 'Say hello from responses.',
         successCriteria: 'Returns HTTP 200',
         expectedHighlights: ['wire request', 'output_text'],

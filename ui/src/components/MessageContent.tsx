@@ -5,6 +5,7 @@ import mermaid from 'mermaid'
 import { Copy, Check, ChevronDown, ChevronUp, Brain } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { parseMessageContent } from './messageContentParser'
+import { getLatestThinkingLines, hasUnclosedThinkingTag } from './thinkingPreview'
 
 // Initialize mermaid with dark theme
 mermaid.initialize({
@@ -101,8 +102,14 @@ const MermaidDiagram = memo(({ code }: { code: string }) => {
 MermaidDiagram.displayName = 'MermaidDiagram'
 
 // Thinking block component
-const ThinkingBlock = memo(({ content }: { content: string }) => {
+const ThinkingBlock = memo(({ content, isLive }: { content: string; isLive: boolean }) => {
+  const PREVIEW_LINES = 5
+  const PREVIEW_LINE_HEIGHT_PX = 20
   const [expanded, setExpanded] = useState(false)
+  const latestLines = getLatestThinkingLines(content)
+  const livePreview = latestLines.join('\n')
+  const displayContent = expanded || !isLive ? content.trim() : livePreview
+  const title = 'Thinking process'
   
   return (
     <div className="my-3 border border-border/50 rounded-lg bg-secondary/30 overflow-hidden">
@@ -111,7 +118,12 @@ const ThinkingBlock = memo(({ content }: { content: string }) => {
         className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-secondary/50 transition-colors"
       >
         <Brain className="w-4 h-4 text-muted-foreground" />
-        <span className="text-xs font-mono text-muted-foreground flex-1">Thinking process</span>
+        <span className="text-xs font-mono text-muted-foreground flex-1 truncate" title={title}>
+          {title}
+        </span>
+        {isLive && (
+          <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" aria-hidden="true" />
+        )}
         {expanded ? (
           <ChevronUp className="w-4 h-4 text-muted-foreground" />
         ) : (
@@ -120,13 +132,20 @@ const ThinkingBlock = memo(({ content }: { content: string }) => {
       </button>
       <div
         className={cn(
-          'overflow-hidden transition-all duration-300 ease-in-out',
-          expanded ? 'max-h-[2000px]' : 'max-h-0'
+          'overflow-hidden transition-all duration-300 ease-in-out border-t border-border/30',
+          expanded ? 'max-h-[420px]' : ''
         )}
+        style={!expanded ? { height: `${PREVIEW_LINES * PREVIEW_LINE_HEIGHT_PX + 20}px` } : undefined}
       >
-        <div className="px-3 pb-3 pt-1 border-t border-border/30 overflow-x-auto">
-          <pre className="text-xs text-muted-foreground font-mono whitespace-pre-wrap break-words">
-            {content.trim()}
+        <div className={cn(
+          'px-3 pb-3 pt-2 overflow-x-auto',
+          expanded ? 'max-h-96 overflow-y-auto' : 'overflow-y-hidden'
+        )}>
+          <pre className={cn(
+            'text-xs text-muted-foreground font-mono leading-5',
+            expanded ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'
+          )}>
+            {displayContent || 'Waiting for reasoning details...'}
           </pre>
         </div>
       </div>
@@ -261,6 +280,9 @@ const CodeBlock = ({
 
 export const MessageContent = memo(function MessageContent({ content, className }: MessageContentProps) {
   const parts = parseMessageContent(content)
+  const hasLiveThinking = hasUnclosedThinkingTag(content)
+  const thinkingParts = parts.filter((part) => part.type === 'thinking').length
+  let seenThinkingParts = 0
   
   return (
     <div className={cn('relative group', className)}>
@@ -273,7 +295,15 @@ export const MessageContent = memo(function MessageContent({ content, className 
       <div className="prose prose-sm prose-invert max-w-none">
         {parts.map((part, index) => {
           if (part.type === 'thinking') {
-            return <ThinkingBlock key={index} content={part.content} />
+            const thinkingPartIndex = seenThinkingParts
+            seenThinkingParts += 1
+            return (
+              <ThinkingBlock
+                key={index}
+                content={part.content}
+                isLive={hasLiveThinking && thinkingPartIndex === thinkingParts - 1}
+              />
+            )
           }
           
           return (

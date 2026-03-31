@@ -12,7 +12,7 @@ export type BenchmarkMode =
 
 export type BenchmarkExecutionMode = "showcase" | "diagnostic";
 
-export type BenchmarkExampleSource = "opencode" | "builtin" | "file";
+export type BenchmarkExampleSource = "opencode" | "builtin" | "file" | "huggingface";
 
 export type BenchmarkCapabilityKey =
   | "chat_basic"
