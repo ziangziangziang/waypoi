@@ -13,7 +13,6 @@ mermaid.initialize({
   theme: 'dark',
   securityLevel: 'loose',
   fontFamily: 'JetBrains Mono, monospace',
-  suppressErrorRendering: true, // Don't render error SVGs to DOM
 })
 
 // Clean up any mermaid error elements that might have been appended to body
