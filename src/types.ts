@@ -1,6 +1,6 @@
 export type HealthStatus = "up" | "down";
-export type EndpointType = "llm" | "diffusion" | "audio" | "embedding";
-export type ModelModality = "text" | "image" | "audio" | "embedding";
+export type EndpointType = "llm" | "diffusion" | "audio" | "embedding" | "video";
+export type ModelModality = "text" | "image" | "audio" | "embedding" | "video";
 
 export interface ModelCapabilities {
   input: ModelModality[];
@@ -176,7 +176,12 @@ export interface ResponsesApiRequest {
   tools?: unknown[];
   tool_choice?: unknown;
   temperature?: number;
+  top_p?: number;
   max_tokens?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  seed?: number;
+  stop?: string | string[];
   stream?: boolean;
   [key: string]: unknown;
 }
@@ -283,4 +288,35 @@ export interface McpTool {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+}
+
+// ========================================
+// Video Generation Types
+// ========================================
+
+export interface VideoGenerationRequest {
+  model?: string;
+  prompt: string;
+  negative_prompt?: string;
+  image_url?: string;
+  audio_url?: string;
+  duration?: number;
+  resolution?: string;
+  n?: number;
+  seed?: number;
+  watermark?: boolean;
+  prompt_extend?: boolean;
+  response_format?: "url" | "b64_json";
+  user?: string;
+}
+
+export interface VideoObject {
+  url?: string;
+  b64_json?: string;
+  revised_prompt?: string;
+}
+
+export interface VideoGenerationResponse {
+  created: number;
+  data: VideoObject[];
 }

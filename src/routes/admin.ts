@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { StoragePaths } from "../storage/files";
+import { listAllProtocolAdapters } from "../protocols/registry";
 import {
   deleteProvider,
   deleteProviderModel,
@@ -15,7 +16,8 @@ import {
   upsertProviderModel,
 } from "../providers/repository";
 import { ProviderModelRecord, ProviderRecord } from "../providers/types";
-import { listPools } from "../pools/repository";
+import { listPools, savePools } from "../pools/repository";
+import { PoolDefinition } from "../pools/types";
 import { rebuildDefaultPools } from "../pools/builder";
 import { BenchmarkCliOptions } from "../benchmark/types";
 import { listBenchmarkExamples } from "../benchmark/runner";
@@ -103,6 +105,10 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       version: env.version ?? "0.0.0",
       now: new Date().toISOString(),
     });
+  });
+
+  app.get("/admin/protocols", async (_req, reply) => {
+    reply.send({ data: listAllProtocolAdapters() });
   });
 
   app.get("/admin/providers", async (_req, reply) => {
@@ -338,6 +344,103 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
     reply.send(pools);
   });
 
+  app.post(
+    "/admin/pools",
+    async (req: FastifyRequest<{ Body: Partial<PoolDefinition> }>, reply: FastifyReply) => {
+      const body = req.body ?? {};
+      if (!body.id?.trim()) {
+        reply.code(400).send({ error: { message: "Pool ID is required" } });
+        return;
+      }
+      const existing = await listPools(paths);
+      if (existing.some((p) => p.id === body.id)) {
+        reply.code(409).send({ error: { message: "A pool with this ID already exists" } });
+        return;
+      }
+      const pool: PoolDefinition = {
+        id: body.id.trim(),
+        name: body.name?.trim() || body.id.trim(),
+        aliases: body.aliases ?? [body.id.trim()],
+        enabled: body.enabled !== false,
+        strategy: (body.strategy as PoolDefinition["strategy"]) ?? "highest_rank_available",
+        requiredInput: body.requiredInput ?? [],
+        requiredOutput: body.requiredOutput ?? [],
+        scoreFallback: typeof body.scoreFallback === "number" ? body.scoreFallback : 20,
+        candidates: [],
+        candidateSelection: body.candidateSelection ?? [],
+        userDefined: true,
+        updatedAt: new Date().toISOString(),
+      };
+      existing.push(pool);
+      await savePools(paths, existing);
+      reply.code(201).send(pool);
+    }
+  );
+
+  app.put(
+    "/admin/pools/:id",
+    async (req: FastifyRequest<{ Params: { id: string }; Body: Partial<PoolDefinition> }>, reply: FastifyReply) => {
+      const { id } = req.params;
+      const body = req.body ?? {};
+      const pools = await listPools(paths);
+      const idx = pools.findIndex((p) => p.id === id);
+      if (idx === -1) {
+        reply.code(404).send({ error: { message: "Pool not found" } });
+        return;
+      }
+      const existing = pools[idx];
+      if (!existing.userDefined) {
+        reply.code(403).send({ error: { message: "Cannot modify auto-generated pools" } });
+        return;
+      }
+      pools[idx] = {
+        ...existing,
+        name: body.name !== undefined ? body.name.trim() : existing.name,
+        aliases: body.aliases ?? existing.aliases,
+        enabled: body.enabled !== undefined ? body.enabled : existing.enabled,
+        strategy: (body.strategy as PoolDefinition["strategy"]) ?? existing.strategy,
+        requiredInput: body.requiredInput ?? existing.requiredInput,
+        requiredOutput: body.requiredOutput ?? existing.requiredOutput,
+        scoreFallback: typeof body.scoreFallback === "number" ? body.scoreFallback : existing.scoreFallback,
+        candidateSelection: body.candidateSelection ?? existing.candidateSelection,
+        updatedAt: new Date().toISOString(),
+      };
+      await savePools(paths, pools);
+      reply.send(pools[idx]);
+    }
+  );
+
+  app.delete("/admin/pools/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const { id } = req.params;
+    const pools = await listPools(paths);
+    const idx = pools.findIndex((p) => p.id === id);
+    if (idx === -1) {
+      reply.code(404).send({ error: { message: "Pool not found" } });
+      return;
+    }
+    if (!pools[idx].userDefined) {
+      reply.code(403).send({ error: { message: "Cannot delete auto-generated pools" } });
+      return;
+    }
+    pools.splice(idx, 1);
+    await savePools(paths, pools);
+    reply.send({ deleted: id });
+  });
+
+  app.post("/admin/pools/:id/toggle", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const { id } = req.params;
+    const pools = await listPools(paths);
+    const pool = pools.find((p) => p.id === id);
+    if (!pool) {
+      reply.code(404).send({ error: { message: "Pool not found" } });
+      return;
+    }
+    pool.enabled = !pool.enabled;
+    pool.updatedAt = new Date().toISOString();
+    await savePools(paths, pools);
+    reply.send(pool);
+  });
+
   app.post("/admin/pools/rebuild", async (_req, reply) => {
     const pools = await rebuildDefaultPools(paths);
     reply.send({ rebuilt: pools.length, pools });
@@ -355,14 +458,23 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       const body = req.body ?? {};
       const run = await startBenchmarkRun(paths, {
         suite: body.suite,
+        exampleId: body.exampleId,
         scenarioPath: body.scenarioPath,
         modelOverride: body.modelOverride,
         outPath: body.outPath,
         configPath: body.configPath,
         profile: body.profile,
         baselinePath: body.baselinePath,
+        executionMode: body.executionMode,
         updateCapCache: body.updateCapCache,
         capTtlDays: body.capTtlDays,
+        temperature: body.temperature,
+        top_p: body.top_p,
+        max_tokens: body.max_tokens,
+        presence_penalty: body.presence_penalty,
+        frequency_penalty: body.frequency_penalty,
+        seed: body.seed,
+        stop: body.stop,
       });
       reply.code(202).send(run);
     }

@@ -736,8 +736,7 @@ async function runChatScenario(
     model,
     messages: [{ role: "user", content: scenario.prompt }],
     stream: false,
-    temperature: scenario.temperature ?? effective.defaults.temperature,
-    max_tokens: scenario.max_tokens ?? effective.defaults.max_tokens,
+    ...buildGenerationParams(scenario, effective),
   };
 
   const envelope = await requestJson(
@@ -810,8 +809,7 @@ async function runResponsesScenario(
     model,
     input: scenario.prompt,
     stream: false,
-    temperature: scenario.temperature ?? effective.defaults.temperature,
-    max_tokens: scenario.max_tokens ?? effective.defaults.max_tokens,
+    ...buildGenerationParams(scenario, effective),
   };
 
   const envelope = await requestJson(
@@ -910,8 +908,7 @@ async function runAgentScenario(
       model,
       messages,
       stream: false,
-      temperature: scenario.temperature ?? effective.defaults.temperature,
-      max_tokens: scenario.max_tokens ?? effective.defaults.max_tokens,
+      ...buildGenerationParams(scenario, effective),
     };
 
     if (selectedTools.length > 0) {
@@ -1401,8 +1398,7 @@ async function runOmniCallScenario(
       },
     ],
     stream: false,
-    temperature: scenario.temperature ?? effective.defaults.temperature,
-    max_tokens: scenario.max_tokens ?? effective.defaults.max_tokens,
+    ...buildGenerationParams(scenario, effective),
   };
 
   const envelope = await requestJson(
@@ -1628,6 +1624,42 @@ function getSelectedTools(requestedNames?: string[]) {
 function parseAssistantContent(response: ChatResponse): string {
   const content = response.choices?.[0]?.message?.content;
   return parseMessageContent(content);
+}
+
+function buildGenerationParams(
+  scenario: BenchmarkScenario,
+  effective: EffectiveBenchmarkConfig
+): Record<string, unknown> {
+  return compactObject({
+    temperature:
+      scenario.temperature ??
+      effective.run.temperature ??
+      effective.defaults.temperature,
+    top_p:
+      scenario.top_p ??
+      effective.run.top_p ??
+      effective.defaults.top_p,
+    max_tokens:
+      scenario.max_tokens ??
+      effective.run.max_tokens ??
+      effective.defaults.max_tokens,
+    presence_penalty:
+      scenario.presence_penalty ??
+      effective.run.presence_penalty ??
+      effective.defaults.presence_penalty,
+    frequency_penalty:
+      scenario.frequency_penalty ??
+      effective.run.frequency_penalty ??
+      effective.defaults.frequency_penalty,
+    seed:
+      scenario.seed ??
+      effective.run.seed ??
+      effective.defaults.seed,
+    stop:
+      scenario.stop ??
+      effective.run.stop ??
+      effective.defaults.stop,
+  });
 }
 
 function extractResponsesOutputText(response: {
@@ -2440,6 +2472,12 @@ function collectTopFailureReasons(samples: ScenarioRunSample[]): Array<{ reason:
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([reason, count]) => ({ reason, count }));
+}
+
+function compactObject(source: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(source).filter(([, value]) => value !== undefined)
+  );
 }
 
 function percentile(sorted: number[], p: number): number {

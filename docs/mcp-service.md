@@ -132,3 +132,47 @@ Error:
 
 - `ok: false`
 - typed `error` (`invalid_request`, `no_vision_model`, `upstream_error`, ...)
+
+## Tool: `generate_video`
+
+Generate a video from a text prompt or image using Alibaba Cloud ModelStudio (Wan models).
+Supports text-to-video and image-to-video generation. Videos are generated asynchronously
+and may take 1-5 minutes.
+
+Governance note: video URLs are returned directly (not written to disk) because videos are
+streaming media files typically consumed via URL rather than embedded.
+
+### Input fields
+
+- `prompt` (required, string): Detailed description of the desired video content, style, camera movement, and lighting.
+- `model` (optional, string): Model name (e.g., `wan2.6-i2v-flash`, `wan2.6-t2v`). Auto-selected when omitted.
+- `image_url` (optional, string): URL or data URL of the first-frame image for image-to-video generation.
+- `audio_url` (optional, string): URL of an audio file to sync with the video (wan2.6/wan2.5 models only).
+- `duration` (optional, integer `2..15`): Video duration in seconds. Model-dependent defaults apply.
+- `resolution` (optional, `"480P"`, `"720P"`, or `"1080P"`): Output resolution tier.
+- `negative_prompt` (optional, string): Description of content to exclude.
+- `seed` (optional, integer `0..2147483647`): Random seed for reproducibility.
+- `watermark` (optional, boolean): Add "AI Generated" watermark (default: false).
+- `prompt_extend` (optional, boolean): Enable intelligent prompt rewriting (default: true).
+
+### Response shape
+
+Success:
+
+- `ok: true`
+- `summary`: "Generated 1 video."
+- `model`: upstream model name used
+- `url`: URL to the generated MP4 video (valid for 24 hours)
+- `revised_prompt` (optional): optimized prompt if prompt_extend was enabled
+- `video_count`, `duration`, `resolution` (optional): usage metadata
+
+Error:
+
+- `ok: false`
+- typed `error` (`invalid_request`, `no_video_model`, `no_video_output`, `upstream_error`, ...)
+
+### Response notes
+
+- Video URLs expire after 24 hours. Download and save videos promptly to permanent storage.
+- The `generate_video` tool has a 5-minute timeout to accommodate async generation.
+- Output video format: MP4 (H.264 encoding), 30 fps.

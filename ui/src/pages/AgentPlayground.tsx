@@ -131,6 +131,80 @@ function firstSelectableModelId(models: Model[]): string {
 // Maximum tool iterations per user message to prevent infinite loops
 const MAX_TOOL_ITERATIONS = 10
 
+type GenerationParamsDraft = {
+  temperature: string
+  topP: string
+  maxTokens: string
+  presencePenalty: string
+  frequencyPenalty: string
+  seed: string
+  stop: string
+}
+
+type GenerationParamsPayload = {
+  temperature?: number
+  top_p?: number
+  max_tokens?: number
+  presence_penalty?: number
+  frequency_penalty?: number
+  seed?: number
+  stop?: string | string[]
+}
+
+type NumericGenerationParamKey =
+  | 'temperature'
+  | 'top_p'
+  | 'max_tokens'
+  | 'presence_penalty'
+  | 'frequency_penalty'
+  | 'seed'
+
+function parseGenerationParams(draft: GenerationParamsDraft): { payload: GenerationParamsPayload; error?: string } {
+  const payload: GenerationParamsPayload = {}
+  const parseNumber = (
+    raw: string,
+    label: string,
+    key: NumericGenerationParamKey,
+    opts?: { min?: number; max?: number; integer?: boolean }
+  ): string | null => {
+    const trimmed = raw.trim()
+    if (!trimmed) return null
+    const parsed = Number(trimmed)
+    if (!Number.isFinite(parsed)) {
+      return `${label} must be a valid number.`
+    }
+    if (opts?.integer && !Number.isInteger(parsed)) {
+      return `${label} must be an integer.`
+    }
+    if (typeof opts?.min === 'number' && parsed < opts.min) {
+      return `${label} must be >= ${opts.min}.`
+    }
+    if (typeof opts?.max === 'number' && parsed > opts.max) {
+      return `${label} must be <= ${opts.max}.`
+    }
+    payload[key] = parsed
+    return null
+  }
+
+  const errors = [
+    parseNumber(draft.temperature, 'Temperature', 'temperature'),
+    parseNumber(draft.topP, 'Top P', 'top_p', { min: 0, max: 1 }),
+    parseNumber(draft.maxTokens, 'Max Tokens', 'max_tokens', { min: 1, integer: true }),
+    parseNumber(draft.presencePenalty, 'Presence Penalty', 'presence_penalty', { min: -2, max: 2 }),
+    parseNumber(draft.frequencyPenalty, 'Frequency Penalty', 'frequency_penalty', { min: -2, max: 2 }),
+    parseNumber(draft.seed, 'Seed', 'seed', { min: 0, integer: true }),
+  ].filter((error): error is string => Boolean(error))
+
+  const stops = draft.stop
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  if (stops.length === 1) payload.stop = stops[0]
+  if (stops.length > 1) payload.stop = stops
+
+  return { payload, error: errors[0] }
+}
+
 export function AgentPlayground() {
   const MAX_INPUT_LINES = 10
   // Session state
@@ -173,6 +247,16 @@ export function AgentPlayground() {
   const [callModeEnabled, setCallModeEnabled] = useState(false)
   const [callStatus, setCallStatus] = useState<'idle' | 'recording' | 'sending' | 'playing'>('idle')
   const [callError, setCallError] = useState<string | null>(null)
+  const [showGenerationParams, setShowGenerationParams] = useState(false)
+  const [generationParams, setGenerationParams] = useState<GenerationParamsDraft>({
+    temperature: '',
+    topP: '',
+    maxTokens: '',
+    presencePenalty: '',
+    frequencyPenalty: '',
+    seed: '',
+    stop: '',
+  })
   
   // Image generation settings
   const [imageSize, setImageSize] = useState<ImageSize>(() => loadSettings().defaultImageSize)
@@ -582,7 +666,8 @@ export function AgentPlayground() {
   // The main agentic loop
   const runAgentLoop = async (
     conversationHistory: Message[],
-    assistantMessageId: string
+    assistantMessageId: string,
+    generationPayload: GenerationParamsPayload
   ): Promise<void> => {
     let iteration = 0
     let currentHistory = [...conversationHistory]
@@ -617,6 +702,7 @@ export function AgentPlayground() {
           { 
             model: selectedModel, 
             messages: chatMessages,
+            ...generationPayload,
             tools: buildToolsForApi(),
             tool_choice: selectedTools.size > 0 ? 'auto' : undefined,
           },
@@ -855,6 +941,11 @@ export function AgentPlayground() {
       ? Boolean(pendingAudio)
       : hasText || pendingImages.length > 0
     if (!canSend || isLoading) return
+    const { payload: generationPayload, error: generationParamError } = parseGenerationParams(generationParams)
+    if (generationParamError) {
+      setCallError(generationParamError)
+      return
+    }
 
     stopAgentRef.current = false
     setCallError(null)
@@ -948,6 +1039,7 @@ export function AgentPlayground() {
           model: selectedModel,
           messages: chatMessages,
           stream: false,
+          ...generationPayload,
         })
         const assistant = response.choices?.[0]?.message
         const assistantText =
@@ -1089,7 +1181,8 @@ export function AgentPlayground() {
         // Run agentic loop
         await runAgentLoop(
           [...messages, userMessage, assistantMessage],
-          assistantMessage.id
+          assistantMessage.id,
+          generationPayload
         )
         if (activeSessionId) {
           await maybeAutoTitleSession(activeSessionId)
@@ -1104,7 +1197,7 @@ export function AgentPlayground() {
 
         let streamState = createThinkingStreamState()
         for await (const chunk of streamChatCompletion(
-          { model: selectedModel, messages: chatMessages },
+          { model: selectedModel, messages: chatMessages, ...generationPayload },
           abortControllerRef.current.signal
         )) {
           streamState = applyThinkingChunk(streamState, chunk)
@@ -1573,6 +1666,96 @@ export function AgentPlayground() {
                   </div>
                 </div>
               )}
+              <div className="mb-3">
+                <button
+                  type="button"
+                  className="w-full text-left text-xs font-mono text-muted-foreground border border-border rounded px-2 py-1 hover:bg-secondary/50"
+                  onClick={() => setShowGenerationParams((prev) => !prev)}
+                >
+                  {showGenerationParams ? 'Hide Generation Params' : 'Show Generation Params'}
+                </button>
+                {showGenerationParams && (
+                  <div className="mt-2 grid grid-cols-2 gap-2 rounded border border-border/60 bg-secondary/20 p-2">
+                    <label className="text-xs text-muted-foreground block">
+                      Temperature
+                      <input
+                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                        value={generationParams.temperature}
+                        onChange={(event) =>
+                          setGenerationParams((prev) => ({ ...prev, temperature: event.target.value }))
+                        }
+                        placeholder="e.g. 0.7"
+                      />
+                    </label>
+                    <label className="text-xs text-muted-foreground block">
+                      Top P
+                      <input
+                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                        value={generationParams.topP}
+                        onChange={(event) =>
+                          setGenerationParams((prev) => ({ ...prev, topP: event.target.value }))
+                        }
+                        placeholder="e.g. 1"
+                      />
+                    </label>
+                    <label className="text-xs text-muted-foreground block">
+                      Max Tokens
+                      <input
+                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                        value={generationParams.maxTokens}
+                        onChange={(event) =>
+                          setGenerationParams((prev) => ({ ...prev, maxTokens: event.target.value }))
+                        }
+                        placeholder="e.g. 512"
+                      />
+                    </label>
+                    <label className="text-xs text-muted-foreground block">
+                      Presence Penalty
+                      <input
+                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                        value={generationParams.presencePenalty}
+                        onChange={(event) =>
+                          setGenerationParams((prev) => ({ ...prev, presencePenalty: event.target.value }))
+                        }
+                        placeholder="-2 to 2"
+                      />
+                    </label>
+                    <label className="text-xs text-muted-foreground block">
+                      Frequency Penalty
+                      <input
+                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                        value={generationParams.frequencyPenalty}
+                        onChange={(event) =>
+                          setGenerationParams((prev) => ({ ...prev, frequencyPenalty: event.target.value }))
+                        }
+                        placeholder="-2 to 2"
+                      />
+                    </label>
+                    <label className="text-xs text-muted-foreground block">
+                      Seed
+                      <input
+                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                        value={generationParams.seed}
+                        onChange={(event) =>
+                          setGenerationParams((prev) => ({ ...prev, seed: event.target.value }))
+                        }
+                        placeholder="integer"
+                      />
+                    </label>
+                    <label className="text-xs text-muted-foreground block col-span-2">
+                      Stop Sequences (comma-separated)
+                      <input
+                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                        value={generationParams.stop}
+                        onChange={(event) =>
+                          setGenerationParams((prev) => ({ ...prev, stop: event.target.value }))
+                        }
+                        placeholder="END, STOP"
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
               <form onSubmit={handleSubmit} className="flex gap-3">
                 <input
                   type="file"
@@ -1708,6 +1891,13 @@ async function* streamChatCompletionWithTools(
   request: {
     model: string
     messages: ApiChatMessage[]
+    temperature?: number
+    top_p?: number
+    max_tokens?: number
+    presence_penalty?: number
+    frequency_penalty?: number
+    seed?: number
+    stop?: string | string[]
     tools?: unknown[]
     tool_choice?: unknown
   },
@@ -1719,6 +1909,13 @@ async function* streamChatCompletionWithTools(
     model: request.model,
     messages: request.messages,
     stream: true,
+    temperature: request.temperature,
+    top_p: request.top_p,
+    max_tokens: request.max_tokens,
+    presence_penalty: request.presence_penalty,
+    frequency_penalty: request.frequency_penalty,
+    seed: request.seed,
+    stop: request.stop,
   }
   
   // Only include tools if we have them

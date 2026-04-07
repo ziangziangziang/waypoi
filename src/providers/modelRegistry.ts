@@ -219,7 +219,7 @@ export async function listModelAliases(paths: StoragePaths): Promise<string[]> {
 export interface SmartPoolAvailability {
   id: string;
   alias: string;
-  strategy: "highest_rank_available";
+  strategy: "highest_rank_available" | "remaining_limit";
   candidateCount: number;
   capabilities: ModelCapabilities;
 }
@@ -366,9 +366,13 @@ function buildCandidate(provider: ProviderRecord, model: ProviderModelRecord): P
     scoreSource: typeof score === "number" ? "benchmark.livebench" : "fallback",
     limits: {
       requestsPerMinute: model.limits?.requests?.perMinute ?? provider.limits?.requests?.perMinute,
+      requestsPerHour: model.limits?.requests?.perHour ?? provider.limits?.requests?.perHour,
       requestsPerDay: model.limits?.requests?.perDay ?? provider.limits?.requests?.perDay,
+      requestsPerWeek: model.limits?.requests?.perWeek ?? provider.limits?.requests?.perWeek,
       tokensPerMinute: model.limits?.tokens?.perMinute ?? provider.limits?.tokens?.perMinute,
+      tokensPerHour: model.limits?.tokens?.perHour ?? provider.limits?.tokens?.perHour,
       tokensPerDay: model.limits?.tokens?.perDay ?? provider.limits?.tokens?.perDay,
+      tokensPerWeek: model.limits?.tokens?.perWeek ?? provider.limits?.tokens?.perWeek,
     },
   };
 }

@@ -29,7 +29,9 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "concurrently -n server,ui -c blue,green \"tsx watch src/index.ts\" \"npm run dev --prefix ui\"",
+    "dev:server": "tsx watch src/index.ts",
+    "dev:all": "concurrently -n server,ui -c blue,green \"tsx watch src/index.ts\" \"npm run dev --prefix ui\"",
     "build": "tsc -p tsconfig.json && cd ui && npm run build",
     "build:ui": "cd ui && npm run build",
     "build:all": "npm run build",
@@ -51,6 +53,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
+    "concurrently": "^9.1.0",
     "tsx": "^4.16.2",
     "typescript": "^5.5.4"
   }

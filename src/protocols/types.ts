@@ -9,7 +9,8 @@ export type ProtocolOperation =
   | "images_variations"
   | "audio_transcriptions"
   | "audio_translations"
-  | "audio_speech";
+  | "audio_speech"
+  | "video_generations";
 
 export interface ProtocolAuthConfig {
   type: "bearer" | "query" | "header" | "none";

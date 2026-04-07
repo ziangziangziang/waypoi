@@ -99,7 +99,7 @@ export async function importProviders(
     const protocolRaw = (config.endpoint?.protocol ?? entry.protocol ?? "unknown").toLowerCase();
     const normalizedProtocol = canonicalizeProtocol(protocolRaw);
     const protocol: ProviderProtocol =
-      normalizedProtocol === "openai" || normalizedProtocol === "inference_v2"
+      normalizedProtocol === "openai" || normalizedProtocol === "inference_v2" || normalizedProtocol === "dashscope"
         ? normalizedProtocol
         : "unknown";
     const auth = parseAuthConfig(config.auth);
@@ -348,6 +348,20 @@ function toCapabilities(
         input.add("text");
         output.add("embedding");
         break;
+      case "text-to-video":
+        input.add("text");
+        output.add("video");
+        break;
+      case "image-to-video":
+        input.add("text");
+        input.add("image");
+        output.add("video");
+        break;
+      case "text-image-to-video":
+        input.add("text");
+        input.add("image");
+        output.add("video");
+        break;
     }
   }
 
@@ -371,9 +385,12 @@ function toCapabilities(
 
 function inferEndpointType(
   capabilities: ModelCapabilities
-): "llm" | "diffusion" | "audio" | "embedding" {
+): "llm" | "diffusion" | "audio" | "embedding" | "video" {
   if (capabilities.output.includes("embedding")) {
     return "embedding";
+  }
+  if (capabilities.output.includes("video")) {
+    return "video";
   }
   if (capabilities.output.includes("image")) {
     return "diffusion";

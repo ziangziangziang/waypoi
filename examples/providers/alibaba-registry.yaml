@@ -1,0 +1,7 @@
+providers:
+  - id: alibaba-llm
+    name: Alibaba Cloud Model Studio (OpenAI Compatible)
+    file: alibaba-llm.yaml
+  - id: alibaba-dashscope
+    name: Alibaba Cloud Model Studio (DashScope Native)
+    file: alibaba-dashscope.yaml

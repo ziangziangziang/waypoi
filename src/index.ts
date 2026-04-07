@@ -4,6 +4,7 @@ import { registerEmbeddingsRoutes } from "./routes/embeddings";
 import { registerModelsRoutes } from "./routes/models";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerImageRoutes } from "./routes/images";
+import { registerVideoRoutes } from "./routes/videos";
 import { registerAudioRoutes } from "./routes/audio";
 import { registerResponsesRoutes } from "./routes/responses";
 import { registerStatsRoutes } from "./routes/stats";
@@ -56,6 +57,7 @@ async function start(): Promise<void> {
   await registerEmbeddingsRoutes(app, paths);
   await registerModelsRoutes(app, paths);
   await registerImageRoutes(app, paths);
+  await registerVideoRoutes(app, paths);
   await registerAudioRoutes(app, paths);
   await registerResponsesRoutes(app, paths);
   
@@ -177,7 +179,7 @@ async function start(): Promise<void> {
   });
 
   console.log(`\n🚀 Waypoi running on http://localhost:${PORT}`);
-  console.log(`   Endpoints: /v1/chat/completions, /v1/embeddings, /v1/images/*, /v1/audio/*`);
+  console.log(`   Endpoints: /v1/chat/completions, /v1/embeddings, /v1/images/*, /v1/videos/*, /v1/audio/*`);
   console.log(`   MCP Service: /mcp`);
   console.log(`   Admin: /admin/*, /admin/stats, /admin/sessions, /admin/mcp, /admin/benchmarks/runs`);
   console.log(`   UI: http://localhost:${PORT}/ui\n`);

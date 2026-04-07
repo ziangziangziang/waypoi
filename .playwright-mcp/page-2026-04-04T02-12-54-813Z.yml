@@ -1,0 +1,6 @@
+- generic [ref=e2]:
+  - heading "Waypoi UI" [level=1] [ref=e3]
+  - paragraph [ref=e4]: "UI not built. Run:"
+  - paragraph [ref=e5]:
+    - code [ref=e6]: cd ui && npm install && npm run build
+  - paragraph [ref=e7]: Then restart the server.

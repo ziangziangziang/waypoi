@@ -1,5 +1,6 @@
 import { inferenceV2ProtocolAdapter } from "./adapters/inferenceV2";
 import { openAiProtocolAdapter } from "./adapters/openai";
+import { dashscopeProtocolAdapter } from "./adapters/dashscope";
 import { ProtocolAdapter, ProtocolOperation } from "./types";
 
 const PROTOCOL_ALIASES: Record<string, string> = {
@@ -11,12 +12,38 @@ const PROTOCOL_ALIASES: Record<string, string> = {
   "ray-infer-v2": "inference_v2",
   v2_infer: "inference_v2",
   "v2-infer": "inference_v2",
+  dashscope: "dashscope",
 };
 
 const ADAPTERS = new Map<string, ProtocolAdapter>([
   [openAiProtocolAdapter.id, openAiProtocolAdapter],
   [inferenceV2ProtocolAdapter.id, inferenceV2ProtocolAdapter],
+  [dashscopeProtocolAdapter.id, dashscopeProtocolAdapter],
 ]);
+
+const PROTOCOL_METADATA: Record<string, { label: string; description: string }> = {
+  openai: {
+    label: "OpenAI Compatible",
+    description: "Standard OpenAI API format. Supports chat, embeddings, images, and audio.",
+  },
+  inference_v2: {
+    label: "Inference V2 (KServe/Ray)",
+    description: "KServe v2 / Ray Serve inference format. Chat only, no streaming.",
+  },
+  dashscope: {
+    label: "DashScope (Alibaba ModelStudio)",
+    description: "Alibaba Cloud ModelStudio native API. Supports image generation, video generation, and async task-based operations.",
+  },
+};
+
+export interface ProtocolInfo {
+  id: string;
+  label: string;
+  description: string;
+  operations: ProtocolOperation[];
+  streamOperations: ProtocolOperation[];
+  supportsRouting: boolean;
+}
 
 export function canonicalizeProtocol(raw: string | undefined): string {
   const normalized = (raw ?? "unknown").trim().toLowerCase();
@@ -50,6 +77,20 @@ export function listAdapterOperations(
   };
 }
 
+export function listAllProtocolAdapters(): ProtocolInfo[] {
+  return Array.from(ADAPTERS.entries()).map(([id, adapter]) => {
+    const meta = PROTOCOL_METADATA[id] ?? { label: id, description: "" };
+    return {
+      id,
+      label: meta.label,
+      description: meta.description,
+      operations: [...adapter.supportedOperations],
+      streamOperations: [...adapter.streamSupportedOperations],
+      supportsRouting: true,
+    };
+  });
+}
+
 export function routePathToOperation(path: string): ProtocolOperation | null {
   switch (path) {
     case "/v1/chat/completions":
@@ -68,6 +109,8 @@ export function routePathToOperation(path: string): ProtocolOperation | null {
       return "audio_translations";
     case "/v1/audio/speech":
       return "audio_speech";
+    case "/v1/videos/generations":
+      return "video_generations";
     default:
       return null;
   }

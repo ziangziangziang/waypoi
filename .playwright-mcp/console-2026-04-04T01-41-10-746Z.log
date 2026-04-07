@@ -1,0 +1,2 @@
+[      32ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:9469/admin/settings:0
+[      46ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:9469/favicon.ico:0

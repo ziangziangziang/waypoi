@@ -53,6 +53,7 @@ type ShowcaseExchange = {
 
 const SHOWCASE_SUITE = 'showcase'
 const DIAGNOSTIC_SUITES = ['smoke', 'proxy', 'agent', 'pool_smoke', 'omni_call_smoke', 'capabilities']
+const ALL_SUITES = [SHOWCASE_SUITE, ...DIAGNOSTIC_SUITES]
 const SUITE_LABELS: Record<string, string> = {
   showcase: 'Showcase',
   smoke: 'Smoke',
@@ -63,6 +64,86 @@ const SUITE_LABELS: Record<string, string> = {
   capabilities: 'Capabilities',
 }
 const PROFILES = ['local', 'ci']
+
+type GenerationParamDraft = {
+  temperature: string
+  topP: string
+  maxTokens: string
+  presencePenalty: string
+  frequencyPenalty: string
+  seed: string
+  stop: string
+}
+
+type GenerationParamPayload = {
+  temperature?: number
+  top_p?: number
+  max_tokens?: number
+  presence_penalty?: number
+  frequency_penalty?: number
+  seed?: number
+  stop?: string | string[]
+}
+
+type NumericGenerationParamKey =
+  | 'temperature'
+  | 'top_p'
+  | 'max_tokens'
+  | 'presence_penalty'
+  | 'frequency_penalty'
+  | 'seed'
+
+function parseGenerationParamDraft(draft: GenerationParamDraft): { payload: GenerationParamPayload; errors: string[] } {
+  const errors: string[] = []
+  const payload: GenerationParamPayload = {}
+
+  const parseNumber = (
+    raw: string,
+    fieldLabel: string,
+    key: NumericGenerationParamKey,
+    opts?: { min?: number; max?: number; integer?: boolean }
+  ) => {
+    const trimmed = raw.trim()
+    if (!trimmed) return
+    const parsed = Number(trimmed)
+    if (!Number.isFinite(parsed)) {
+      errors.push(`${fieldLabel} must be a valid number.`)
+      return
+    }
+    if (opts?.integer && !Number.isInteger(parsed)) {
+      errors.push(`${fieldLabel} must be an integer.`)
+      return
+    }
+    if (typeof opts?.min === 'number' && parsed < opts.min) {
+      errors.push(`${fieldLabel} must be >= ${opts.min}.`)
+      return
+    }
+    if (typeof opts?.max === 'number' && parsed > opts.max) {
+      errors.push(`${fieldLabel} must be <= ${opts.max}.`)
+      return
+    }
+    payload[key] = parsed
+  }
+
+  parseNumber(draft.temperature, 'Temperature', 'temperature')
+  parseNumber(draft.topP, 'Top P', 'top_p', { min: 0, max: 1 })
+  parseNumber(draft.maxTokens, 'Max Tokens', 'max_tokens', { min: 1, integer: true })
+  parseNumber(draft.presencePenalty, 'Presence Penalty', 'presence_penalty', { min: -2, max: 2 })
+  parseNumber(draft.frequencyPenalty, 'Frequency Penalty', 'frequency_penalty', { min: -2, max: 2 })
+  parseNumber(draft.seed, 'Seed', 'seed', { min: 0, integer: true })
+
+  const stopValues = draft.stop
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  if (stopValues.length === 1) {
+    payload.stop = stopValues[0]
+  } else if (stopValues.length > 1) {
+    payload.stop = stopValues
+  }
+
+  return { payload, errors }
+}
 
 export function Benchmark() {
   const [runs, setRuns] = useState<BenchmarkRunSummary[]>([])
@@ -78,6 +159,18 @@ export function Benchmark() {
   const [scenarioPath, setScenarioPath] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
   const [selectedExampleId, setSelectedExampleId] = useState('')
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [updateCapCache, setUpdateCapCache] = useState(false)
+  const [capTtlDays, setCapTtlDays] = useState('7')
+  const [genParams, setGenParams] = useState<GenerationParamDraft>({
+    temperature: '',
+    topP: '',
+    maxTokens: '',
+    presencePenalty: '',
+    frequencyPenalty: '',
+    seed: '',
+    stop: '',
+  })
   const [showRaw, setShowRaw] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [modelLeaderboard, setModelLeaderboard] = useState<ModelLeaderboardRow[]>([])
@@ -146,6 +239,12 @@ export function Benchmark() {
 
   useEffect(() => {
     void loadExamples(suite)
+  }, [suite])
+
+  useEffect(() => {
+    if (suite === 'capabilities') {
+      setUpdateCapCache(true)
+    }
   }, [suite])
 
   useEffect(() => {
@@ -222,7 +321,12 @@ export function Benchmark() {
     setStarting(true)
     setError(null)
     try {
+      const { payload: paramPayload, errors: paramErrors } = parseGenerationParamDraft(genParams)
+      if (paramErrors.length > 0) {
+        throw new Error(paramErrors[0])
+      }
       const executionMode = isShowcase ? 'showcase' : 'diagnostic'
+      const parsedCapTtl = Number(capTtlDays.trim())
       const run = await startBenchmarkRun({
         suite,
         exampleId: isShowcase && selectedExampleId ? selectedExampleId : undefined,
@@ -230,8 +334,12 @@ export function Benchmark() {
         scenarioPath: scenarioPath.trim() || undefined,
         modelOverride: selectedModel || undefined,
         executionMode,
-        updateCapCache: suite === 'capabilities',
-        capTtlDays: 7,
+        updateCapCache: updateCapCache || suite === 'capabilities',
+        capTtlDays:
+          capTtlDays.trim().length > 0 && Number.isFinite(parsedCapTtl) && parsedCapTtl >= 1
+            ? Math.trunc(parsedCapTtl)
+            : 7,
+        ...paramPayload,
       })
       setSelectedRunId(run.id)
       await loadRuns()
@@ -329,22 +437,15 @@ export function Benchmark() {
             </div>
             <div className="p-3 space-y-3">
               <label className="text-xs text-muted-foreground block">
-                Run Mode
+                Suite
                 <select
                   className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                  value={isShowcase ? 'showcase' : 'diagnostic'}
-                  onChange={(event) => {
-                    if (event.target.value === 'showcase') {
-                      setSuite(SHOWCASE_SUITE)
-                      return
-                    }
-                    if (suite === SHOWCASE_SUITE) {
-                      setSuite(DIAGNOSTIC_SUITES[0])
-                    }
-                  }}
+                  value={suite}
+                  onChange={(event) => setSuite(event.target.value)}
                 >
-                  <option value="showcase">Showcase</option>
-                  <option value="diagnostic">Diagnostic</option>
+                  {ALL_SUITES.map((item) => (
+                    <option key={item} value={item}>{SUITE_LABELS[item] ?? item}</option>
+                  ))}
                 </select>
               </label>
 
@@ -353,24 +454,11 @@ export function Benchmark() {
                   <p className="text-2xs uppercase text-muted-foreground">Question Source</p>
                   <p className="text-xs font-mono">vincentkoc/tiny_qa_benchmark (Hugging Face)</p>
                 </div>
-              ) : (
-                <label className="text-xs text-muted-foreground block">
-                  Diagnostic Suite
-                  <select
-                    className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                    value={suite}
-                    onChange={(event) => setSuite(event.target.value)}
-                  >
-                    {DIAGNOSTIC_SUITES.map((item) => (
-                      <option key={item} value={item}>{SUITE_LABELS[item]}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              ) : null}
 
               {isShowcase && (
                 <label className="text-xs text-muted-foreground block">
-                  Question
+                  Example
                   <select
                     className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
                     value={selectedExampleId}
@@ -386,44 +474,154 @@ export function Benchmark() {
                 </label>
               )}
 
-              {!isShowcase && (
+              <div className="grid grid-cols-2 gap-2">
                 <label className="text-xs text-muted-foreground block">
-                  Profile
-                  <select
+                  Temperature
+                  <input
                     className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                    value={profile}
-                    onChange={(event) => setProfile(event.target.value)}
-                  >
-                    {PROFILES.map((item) => (
-                      <option key={item} value={item}>{item}</option>
-                    ))}
-                  </select>
+                    value={genParams.temperature}
+                    onChange={(event) =>
+                      setGenParams((prev) => ({ ...prev, temperature: event.target.value }))
+                    }
+                    placeholder="e.g. 0.7"
+                  />
                 </label>
-              )}
+                <label className="text-xs text-muted-foreground block">
+                  Top P
+                  <input
+                    className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                    value={genParams.topP}
+                    onChange={(event) =>
+                      setGenParams((prev) => ({ ...prev, topP: event.target.value }))
+                    }
+                    placeholder="e.g. 1"
+                  />
+                </label>
+                <label className="text-xs text-muted-foreground block">
+                  Max Tokens
+                  <input
+                    className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                    value={genParams.maxTokens}
+                    onChange={(event) =>
+                      setGenParams((prev) => ({ ...prev, maxTokens: event.target.value }))
+                    }
+                    placeholder="e.g. 512"
+                  />
+                </label>
+                <label className="text-xs text-muted-foreground block">
+                  Presence Penalty
+                  <input
+                    className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                    value={genParams.presencePenalty}
+                    onChange={(event) =>
+                      setGenParams((prev) => ({ ...prev, presencePenalty: event.target.value }))
+                    }
+                    placeholder="-2 to 2"
+                  />
+                </label>
+                <label className="text-xs text-muted-foreground block">
+                  Frequency Penalty
+                  <input
+                    className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                    value={genParams.frequencyPenalty}
+                    onChange={(event) =>
+                      setGenParams((prev) => ({ ...prev, frequencyPenalty: event.target.value }))
+                    }
+                    placeholder="-2 to 2"
+                  />
+                </label>
+                <label className="text-xs text-muted-foreground block">
+                  Seed
+                  <input
+                    className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                    value={genParams.seed}
+                    onChange={(event) =>
+                      setGenParams((prev) => ({ ...prev, seed: event.target.value }))
+                    }
+                    placeholder="integer"
+                  />
+                </label>
+              </div>
 
               <label className="text-xs text-muted-foreground block">
-                Model Override
-                <select
-                  className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                  value={selectedModel}
-                  onChange={(event) => setSelectedModel(event.target.value)}
-                >
-                  <option value="">(auto)</option>
-                  {models.map((model) => (
-                    <option key={model.id} value={model.id}>{model.id}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="text-xs text-muted-foreground block">
-                Scenario File (Optional)
+                Stop Sequences (comma-separated)
                 <input
                   className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                  value={scenarioPath}
-                  onChange={(event) => setScenarioPath(event.target.value)}
-                  placeholder="./examples/scenarios/custom.yaml"
+                  value={genParams.stop}
+                  onChange={(event) =>
+                    setGenParams((prev) => ({ ...prev, stop: event.target.value }))
+                  }
+                  placeholder="END, STOP"
                 />
               </label>
+
+              <button
+                type="button"
+                className="w-full text-left text-xs font-mono text-muted-foreground border border-border rounded px-2 py-1 hover:bg-secondary/50"
+                onClick={() => setAdvancedOpen((prev) => !prev)}
+              >
+                {advancedOpen ? 'Hide Advanced' : 'Show Advanced'}
+              </button>
+
+              {advancedOpen && (
+                <div className="space-y-3 rounded border border-border/60 bg-secondary/20 p-2">
+                  <label className="text-xs text-muted-foreground block">
+                    Profile
+                    <select
+                      className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                      value={profile}
+                      onChange={(event) => setProfile(event.target.value)}
+                    >
+                      {PROFILES.map((item) => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="text-xs text-muted-foreground block">
+                    Model Override
+                    <select
+                      className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                      value={selectedModel}
+                      onChange={(event) => setSelectedModel(event.target.value)}
+                    >
+                      <option value="">(auto)</option>
+                      {models.map((model) => (
+                        <option key={model.id} value={model.id}>{model.id}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="text-xs text-muted-foreground block">
+                    Scenario File (Optional)
+                    <input
+                      className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                      value={scenarioPath}
+                      onChange={(event) => setScenarioPath(event.target.value)}
+                      placeholder="./examples/scenarios/custom.yaml"
+                    />
+                  </label>
+
+                  <label className="text-xs text-muted-foreground block">
+                    Capability TTL Days
+                    <input
+                      className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                      value={capTtlDays}
+                      onChange={(event) => setCapTtlDays(event.target.value)}
+                      placeholder="7"
+                    />
+                  </label>
+
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={updateCapCache}
+                      onChange={(event) => setUpdateCapCache(event.target.checked)}
+                    />
+                    Update Capability Cache
+                  </label>
+                </div>
+              )}
 
               <p className="text-2xs text-muted-foreground">
                 {isShowcase

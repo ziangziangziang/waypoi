@@ -56,7 +56,12 @@ export async function registerResponsesRoutes(app: FastifyInstance, paths: Stora
       messages: normalizedMessages,
       stream: clientWantsStreaming, // Pass through streaming preference
       temperature: body.temperature,
+      top_p: body.top_p,
       max_tokens: body.max_tokens,
+      presence_penalty: body.presence_penalty,
+      frequency_penalty: body.frequency_penalty,
+      seed: body.seed,
+      stop: body.stop,
       tools: transformedTools,
       tool_choice: body.tool_choice
     };

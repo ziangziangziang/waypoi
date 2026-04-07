@@ -20,7 +20,10 @@ const DEFAULTS: BenchmarkDefaults = {
   toolTimeoutMs: 15000,
   maxIterations: 6,
   temperature: 0,
+  top_p: 1,
   max_tokens: 512,
+  presence_penalty: 0,
+  frequency_penalty: 0,
 };
 
 const DEFAULT_PROFILES: Record<string, BenchmarkProfileSettings> = {
@@ -109,6 +112,35 @@ export async function resolveBenchmarkConfig(
         "run.capTtlDays",
         1
       ),
+      temperature: optionalNumberField(
+        cli.temperature ?? fileConfig?.run?.temperature,
+        "run.temperature"
+      ),
+      top_p: optionalBoundedField(
+        cli.top_p ?? fileConfig?.run?.top_p,
+        "run.top_p",
+        0,
+        1
+      ),
+      max_tokens: optionalIntField(
+        cli.max_tokens ?? fileConfig?.run?.max_tokens,
+        "run.max_tokens",
+        1
+      ),
+      presence_penalty: optionalBoundedField(
+        cli.presence_penalty ?? fileConfig?.run?.presence_penalty,
+        "run.presence_penalty",
+        -2,
+        2
+      ),
+      frequency_penalty: optionalBoundedField(
+        cli.frequency_penalty ?? fileConfig?.run?.frequency_penalty,
+        "run.frequency_penalty",
+        -2,
+        2
+      ),
+      seed: optionalIntField(cli.seed ?? fileConfig?.run?.seed, "run.seed", 0),
+      stop: optionalStopField(cli.stop ?? fileConfig?.run?.stop, "run.stop"),
     },
     configSource,
   };
@@ -160,7 +192,22 @@ function validateDefaults(defaults: BenchmarkDefaults): BenchmarkDefaults {
     toolTimeoutMs: intField(defaults.toolTimeoutMs, "defaults.toolTimeoutMs", 1),
     maxIterations: intField(defaults.maxIterations, "defaults.maxIterations", 1),
     temperature: numberField(defaults.temperature, "defaults.temperature"),
+    top_p: boundedField(defaults.top_p, "defaults.top_p", 0, 1),
     max_tokens: intField(defaults.max_tokens, "defaults.max_tokens", 1),
+    presence_penalty: boundedField(
+      defaults.presence_penalty,
+      "defaults.presence_penalty",
+      -2,
+      2
+    ),
+    frequency_penalty: boundedField(
+      defaults.frequency_penalty,
+      "defaults.frequency_penalty",
+      -2,
+      2
+    ),
+    seed: optionalIntField(defaults.seed, "defaults.seed", 0),
+    stop: optionalStopField(defaults.stop, "defaults.stop"),
   };
 }
 
@@ -239,4 +286,52 @@ function boundedField(value: number, field: string, min: number, max: number): n
     throw new Error(`${field} must be between ${min} and ${max}`);
   }
   return value;
+}
+
+function optionalIntField(value: number | undefined, field: string, min: number): number | undefined {
+  if (value === undefined) return undefined;
+  return intField(value, field, min);
+}
+
+function optionalNumberField(value: number | undefined, field: string, min?: number): number | undefined {
+  if (value === undefined) return undefined;
+  return numberField(value, field, min);
+}
+
+function optionalBoundedField(
+  value: number | undefined,
+  field: string,
+  min: number,
+  max: number
+): number | undefined {
+  if (value === undefined) return undefined;
+  return boundedField(value, field, min, max);
+}
+
+function optionalStopField(value: string | string[] | undefined, field: string): string | string[] | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      throw new Error(`${field} must not be empty`);
+    }
+    return trimmed;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      throw new Error(`${field} must include at least one stop sequence`);
+    }
+    const normalized = value.map((item, index) => {
+      if (typeof item !== "string") {
+        throw new Error(`${field}[${index}] must be a string`);
+      }
+      const trimmed = item.trim();
+      if (trimmed.length === 0) {
+        throw new Error(`${field}[${index}] must not be empty`);
+      }
+      return trimmed;
+    });
+    return normalized;
+  }
+  throw new Error(`${field} must be a string or string[]`);
 }

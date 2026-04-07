@@ -333,7 +333,7 @@ export async function listPublicModels(paths: StoragePaths): Promise<string[]> {
 
 export interface ModelWithType {
   id: string;
-  type: 'llm' | 'diffusion' | 'audio' | 'embedding';
+  type: 'llm' | 'diffusion' | 'audio' | 'embedding' | 'video';
   endpointName: string;
   capabilities: ModelCapabilities;
 }

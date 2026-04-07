@@ -41,6 +41,25 @@ export async function getAdminMeta(): Promise<AdminMeta> {
   return handleResponse<AdminMeta>(response);
 }
 
+export interface ProtocolInfo {
+  id: string;
+  label: string;
+  description: string;
+  operations: string[];
+  streamOperations: string[];
+  supportsRouting: boolean;
+}
+
+export interface ProtocolsResponse {
+  data: ProtocolInfo[];
+}
+
+export async function listProtocols(): Promise<ProtocolInfo[]> {
+  const response = await fetch(`${API_BASE}/admin/protocols`);
+  const result = await handleResponse<ProtocolsResponse>(response);
+  return result.data;
+}
+
 // ========================================
 // Providers API
 // ========================================
@@ -91,12 +110,16 @@ export interface ProviderProtocolConfig {
 export interface ProviderLimits {
   requests?: {
     perMinute?: number;
+    perHour?: number;
     perDay?: number;
+    perWeek?: number;
     perMonth?: number;
   };
   tokens?: {
     perMinute?: number;
+    perHour?: number;
     perDay?: number;
+    perWeek?: number;
     perMonth?: number;
   };
   concurrent?: number;
@@ -397,7 +420,12 @@ export interface ChatCompletionRequest {
   messages: ChatMessage[];
   stream?: boolean;
   temperature?: number;
+  top_p?: number;
   max_tokens?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  seed?: number;
+  stop?: string | string[];
   tools?: unknown[];
   tool_choice?: unknown;
 }
@@ -1036,6 +1064,13 @@ export interface BenchmarkRunRecord extends BenchmarkRunSummary {
     executionMode?: 'showcase' | 'diagnostic';
     updateCapCache?: boolean;
     capTtlDays?: number;
+    temperature?: number;
+    top_p?: number;
+    max_tokens?: number;
+    presence_penalty?: number;
+    frequency_penalty?: number;
+    seed?: number;
+    stop?: string | string[];
   };
   progress?: {
     totalScenarios: number;
@@ -1062,6 +1097,13 @@ export async function startBenchmarkRun(payload: {
   executionMode?: 'showcase' | 'diagnostic';
   updateCapCache?: boolean;
   capTtlDays?: number;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  seed?: number;
+  stop?: string | string[];
 }): Promise<BenchmarkRunRecord> {
   const response = await fetch(`${API_BASE}/admin/benchmarks/runs`, {
     method: 'POST',
@@ -1223,6 +1265,77 @@ export async function executeMcpTool(
     body: JSON.stringify({ name, arguments: args }),
   });
   return handleResponse<{ result: string }>(response);
+}
+
+// ========================================
+// Virtual Models (Pools) API
+// ========================================
+
+export interface VirtualModel {
+  id: string;
+  name: string;
+  aliases: string[];
+  enabled: boolean;
+  strategy: 'highest_rank_available' | 'remaining_limit';
+  requiredInput: string[];
+  requiredOutput: string[];
+  scoreFallback: number;
+  candidates: Array<{
+    id: string;
+    providerId: string;
+    modelId: string;
+    score: number;
+    scoreSource: string;
+  }>;
+  candidateSelection: string[];
+  userDefined: boolean;
+  updatedAt: string;
+}
+
+export async function listVirtualModels(): Promise<VirtualModel[]> {
+  const response = await fetch(`${API_BASE}/admin/pools`);
+  return handleResponse<VirtualModel[]>(response);
+}
+
+export async function createVirtualModel(payload: {
+  id: string;
+  name?: string;
+  aliases?: string[];
+  strategy?: 'highest_rank_available' | 'remaining_limit';
+  candidateSelection?: string[];
+}): Promise<VirtualModel> {
+  const response = await fetch(`${API_BASE}/admin/pools`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<VirtualModel>(response);
+}
+
+export async function updateVirtualModel(
+  id: string,
+  payload: Partial<VirtualModel>
+): Promise<VirtualModel> {
+  const response = await fetch(`${API_BASE}/admin/pools/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<VirtualModel>(response);
+}
+
+export async function deleteVirtualModel(id: string): Promise<{ deleted: string }> {
+  const response = await fetch(`${API_BASE}/admin/pools/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  return handleResponse<{ deleted: string }>(response);
+}
+
+export async function toggleVirtualModel(id: string): Promise<VirtualModel> {
+  const response = await fetch(`${API_BASE}/admin/pools/${encodeURIComponent(id)}/toggle`, {
+    method: 'POST',
+  });
+  return handleResponse<VirtualModel>(response);
 }
 
 // ========================================

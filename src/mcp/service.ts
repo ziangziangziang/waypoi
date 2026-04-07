@@ -12,7 +12,8 @@ import {
   runImageGeneration,
 } from "../services/imageGeneration";
 import { imageDataUrlFromPath, runImageUnderstanding } from "../services/imageUnderstanding";
-import { ImageGenerationRequest } from "../types";
+import { resolveVideoGenerationModel, runVideoGeneration } from "../services/videoGeneration";
+import { ImageGenerationRequest, VideoGenerationRequest } from "../types";
 import {
   validateAtMostOneImageInput,
   resolveBinaryOutputPolicy,
@@ -29,6 +30,8 @@ export interface McpServiceDependencies {
   runImageGeneration: typeof runImageGeneration;
   normalizeImageGenerationPayload: typeof normalizeImageGenerationPayload;
   runImageUnderstanding: typeof runImageUnderstanding;
+  runVideoGeneration: typeof runVideoGeneration;
+  resolveVideoGenerationModel: typeof resolveVideoGenerationModel;
 }
 
 export type McpServiceDependencyOverrides = Partial<McpServiceDependencies>;
@@ -42,13 +45,18 @@ const defaultDeps: McpServiceDependencies = {
   runImageGeneration,
   normalizeImageGenerationPayload,
   runImageUnderstanding,
+  runVideoGeneration,
+  resolveVideoGenerationModel,
 };
 
 const GENERATE_IMAGE_TOOL_DESCRIPTION =
-  "Generate or edit images. Successful calls always write files to the waypoi config directory (~/.config/waypoi/generated-images by default; override with WAYPOI_MCP_OUTPUT_ROOT). Report file_path or file_paths. Use include_data=true only when inline image data is also needed.";
+  "Generate or edit images from a text prompt. Supports text-to-image and image-to-image editing. Successful calls always write files to the waypoi config directory (~/.config/waypoi/generated-images by default; override with WAYPOI_MCP_OUTPUT_ROOT). Report file_path or file_paths to the user. Use include_data=true only when inline image data is also needed.";
 
 const UNDERSTAND_IMAGE_TOOL_DESCRIPTION =
-  "Analyze one image and return structured text. Provide exactly one of image_path or image_url. If returning points or boxes, use original-image pixel coordinates. Keep instruction short and say what format you want back.";
+  "Analyze one image and return structured text. Provide exactly one of image_path (local file) or image_url (http/https or data URL). Use the instruction parameter to specify what analysis you need (e.g., 'describe the image', 'find all objects and their bounding boxes', 'extract text via OCR'). If returning points or boxes, use original-image pixel coordinates. Keep instruction concise and specify the output format you expect.";
+
+const GENERATE_VIDEO_TOOL_DESCRIPTION =
+  "Generate videos from text prompts or images. Supports text-to-video and image-to-video generation using Alibaba Cloud ModelStudio (Wan models). Videos are generated asynchronously and may take 1-5 minutes. Returns a URL to the generated MP4 video (H.264 encoding). Provide a detailed prompt describing the desired video content, style, and camera movement. Optionally provide an image_url to use as the first frame for image-to-video generation.";
 
 export function createMcpService(
   paths: StoragePaths,
@@ -251,6 +259,103 @@ export function createMcpService(
           return {
             isError: true,
             content: [{ type: "text" as const, text: JSON.stringify(output) }],
+            structuredContent: output,
+          };
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+    );
+
+    server.registerTool(
+      "generate_video",
+      {
+        description: GENERATE_VIDEO_TOOL_DESCRIPTION,
+        inputSchema: {
+          prompt: z.string().min(1),
+          model: z.string().optional(),
+          image_url: z.string().optional(),
+          audio_url: z.string().optional(),
+          duration: z.number().int().min(2).max(15).optional(),
+          resolution: z.enum(["480P", "720P", "1080P"]).optional(),
+          negative_prompt: z.string().optional(),
+          seed: z.number().int().min(0).max(2147483647).optional(),
+          watermark: z.boolean().optional(),
+          prompt_extend: z.boolean().optional(),
+        },
+      },
+      async (args) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 300_000);
+        try {
+          const resolvedModel = await resolvedDeps.resolveVideoGenerationModel(paths, args.model);
+          if (!resolvedModel) {
+            throw typedError("no_video_model", "No video generation model available. Add or enable a provider model.");
+          }
+          const request: VideoGenerationRequest = {
+            prompt: args.prompt,
+            model: resolvedModel,
+            image_url: args.image_url,
+            audio_url: args.audio_url,
+            duration: args.duration,
+            resolution: args.resolution,
+            negative_prompt: args.negative_prompt,
+            seed: args.seed,
+            watermark: args.watermark,
+            prompt_extend: args.prompt_extend,
+          };
+
+          const generated = await resolvedDeps.runVideoGeneration(paths, request, {}, controller.signal);
+          const payload = generated.payload as { data?: Array<{ url?: string; revised_prompt?: string }>; usage?: { video_count?: number; duration?: number; resolution?: string } };
+          const data = payload.data ?? [];
+          const usage = payload.usage ?? {};
+
+          if (data.length === 0) {
+            throw typedError("no_video_output", "Video generation completed but no video URL was returned.");
+          }
+
+          const videoData = data[0];
+          const output = {
+            ok: true,
+            summary: "Generated 1 video.",
+            model: generated.route.upstreamModel,
+            url: videoData.url,
+            ...(videoData.revised_prompt ? { revised_prompt: videoData.revised_prompt } : {}),
+            ...(usage.video_count ? { video_count: usage.video_count } : {}),
+            ...(usage.duration ? { duration: usage.duration } : {}),
+            ...(usage.resolution ? { resolution: usage.resolution } : {}),
+          };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(output),
+              },
+            ],
+            structuredContent: output,
+          };
+        } catch (error) {
+          const typed = error as Error & { type?: string };
+          const type = typed.type ?? "upstream_error";
+          const message =
+            type === "no_video_model"
+              ? "No video generation model available. Add or enable a provider model."
+              : typed.message || "Video generation failed";
+          const output = {
+            ok: false,
+            error: {
+              type,
+              message,
+            },
+          };
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(output),
+              },
+            ],
             structuredContent: output,
           };
         } finally {

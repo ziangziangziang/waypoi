@@ -1,0 +1,262 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - img "Waypoi" [ref=e7]
+      - generic [ref=e8]:
+        - heading "WAYPOINT" [level=1] [ref=e9]
+        - paragraph [ref=e10]: v0.7.1-beta.0
+    - navigation [ref=e11]:
+      - link "Playground" [ref=e12] [cursor=pointer]:
+        - /url: /ui/playground
+        - img [ref=e13]
+        - generic [ref=e15]: Playground
+      - link "Benchmark" [ref=e16] [cursor=pointer]:
+        - /url: /ui/benchmark
+        - img [ref=e17]
+        - generic [ref=e20]: Benchmark
+      - link "Dashboard" [ref=e21] [cursor=pointer]:
+        - /url: /ui/dashboard
+        - img [ref=e22]
+        - generic [ref=e27]: Dashboard
+      - link "Peek" [ref=e28] [cursor=pointer]:
+        - /url: /ui/peek
+        - img [ref=e29]
+        - generic [ref=e32]: Peek
+      - link "Settings" [ref=e33] [cursor=pointer]:
+        - /url: /ui/settings
+        - img [ref=e34]
+        - generic [ref=e37]: Settings
+    - generic [ref=e39]:
+      - img [ref=e40]
+      - generic [ref=e46]: Status
+      - generic [ref=e49]: live
+  - main [ref=e50]:
+    - generic [ref=e51]:
+      - generic [ref=e53]:
+        - img [ref=e54]
+        - heading "Settings" [level=2] [ref=e57]
+      - generic [ref=e59]:
+        - generic [ref=e60]:
+          - generic [ref=e61]:
+            - img [ref=e62]
+            - generic [ref=e66]: Image Generation
+          - generic [ref=e68]:
+            - generic [ref=e69]: Default Image Size
+            - paragraph [ref=e70]: Used when generating images via diffusion models. Can be overridden per-request in the playground.
+            - generic [ref=e71]:
+              - button "256×256 1:1" [ref=e72] [cursor=pointer]:
+                - generic [ref=e73]: 256×256
+                - generic [ref=e74]: 1:1
+              - button "512×512 1:1" [ref=e75] [cursor=pointer]:
+                - generic [ref=e76]: 512×512
+                - generic [ref=e77]: 1:1
+              - button "1024×1024 1:1" [ref=e78] [cursor=pointer]:
+                - img [ref=e80]
+                - generic [ref=e82]: 1024×1024
+                - generic [ref=e83]: 1:1
+              - button "1024×1792 9:16 (Portrait)" [ref=e84] [cursor=pointer]:
+                - generic [ref=e85]: 1024×1792
+                - generic [ref=e86]: 9:16 (Portrait)
+              - button "1792×1024 16:9 (Landscape)" [ref=e87] [cursor=pointer]:
+                - generic [ref=e88]: 1792×1024
+                - generic [ref=e89]: 16:9 (Landscape)
+        - generic [ref=e90]:
+          - generic [ref=e91]:
+            - img [ref=e92]
+            - generic [ref=e95]: Providers & Models
+            - generic [ref=e96]: 2 providers
+            - button "Add Provider" [active] [ref=e97] [cursor=pointer]:
+              - img
+              - text: Add Provider
+          - generic [ref=e98]:
+            - generic [ref=e100]:
+              - button "cerebras openai https://api.cerebras.ai/v1 1/1 models enabled" [ref=e101] [cursor=pointer]:
+                - generic [ref=e102]:
+                  - paragraph [ref=e104]: cerebras
+                  - generic [ref=e105]: openai
+                - paragraph [ref=e106]: https://api.cerebras.ai/v1
+                - paragraph [ref=e107]: 1/1 models enabled
+              - generic [ref=e108]:
+                - button "Disable" [ref=e109] [cursor=pointer]:
+                  - img
+                  - text: Disable
+                - button "Edit" [ref=e110] [cursor=pointer]:
+                  - img
+                  - text: Edit
+                - button "Add Model" [ref=e111] [cursor=pointer]:
+                  - img
+                  - text: Add Model
+                - button "Delete" [ref=e112] [cursor=pointer]:
+                  - img
+                  - text: Delete
+                - button [ref=e113] [cursor=pointer]:
+                  - img [ref=e114]
+            - generic [ref=e117]:
+              - button "pcai openai https://qwen35-27b.zziang-stjude-o-e609380a.serving.ai-application.stjude.org 1/1 models enabled" [ref=e118] [cursor=pointer]:
+                - generic [ref=e119]:
+                  - paragraph [ref=e121]: pcai
+                  - generic [ref=e122]: openai
+                - paragraph [ref=e123]: https://qwen35-27b.zziang-stjude-o-e609380a.serving.ai-application.stjude.org
+                - paragraph [ref=e124]: 1/1 models enabled
+              - generic [ref=e125]:
+                - button "Disable" [ref=e126] [cursor=pointer]:
+                  - img
+                  - text: Disable
+                - button "Edit" [ref=e127] [cursor=pointer]:
+                  - img
+                  - text: Edit
+                - button "Add Model" [ref=e128] [cursor=pointer]:
+                  - img
+                  - text: Add Model
+                - button "Delete" [ref=e129] [cursor=pointer]:
+                  - img
+                  - text: Delete
+                - button [ref=e130] [cursor=pointer]:
+                  - img [ref=e131]
+        - generic [ref=e133]:
+          - generic [ref=e134]:
+            - generic [ref=e135]:
+              - img [ref=e136]
+              - generic [ref=e138]: MCP Servers
+            - generic [ref=e139]:
+              - button [ref=e140] [cursor=pointer]:
+                - img
+              - button "Add" [ref=e141] [cursor=pointer]:
+                - img
+                - text: Add
+          - generic [ref=e143]:
+            - generic [ref=e145]:
+              - generic [ref=e146]:
+                - paragraph [ref=e147]: waypoi
+                - generic [ref=e148]: 2 tools
+                - generic [ref=e149]: enabled
+              - paragraph [ref=e150]: http://localhost:9469/mcp
+            - generic [ref=e151]:
+              - button "Re-connect and discover tools" [ref=e152] [cursor=pointer]:
+                - img
+              - button "Disable" [ref=e153] [cursor=pointer]:
+                - img
+              - button "Remove" [ref=e154] [cursor=pointer]:
+                - img
+        - generic [ref=e155]:
+          - generic [ref=e157]: About Waypoi
+          - generic [ref=e158]:
+            - paragraph [ref=e159]: Waypoi is a provider-first local AI gateway. It provides an OpenAI-compatible API over multiple providers/models, with routing, failover, and observability.
+            - generic [ref=e160]:
+              - generic [ref=e161]:
+                - paragraph [ref=e162]: Version
+                - paragraph [ref=e163]: 0.7.1-beta.0
+              - generic [ref=e164]:
+                - paragraph [ref=e165]: Config Path
+                - paragraph [ref=e166]: ~/.config/waypoi/providers.json
+        - generic [ref=e167]:
+          - generic [ref=e169]: CLI Commands
+          - generic [ref=e170]:
+            - generic [ref=e171]:
+              - code [ref=e172]: waypoi providers import -f .env
+              - generic [ref=e173]: Import providers and credentials
+            - generic [ref=e174]:
+              - code [ref=e175]: waypoi providers
+              - generic [ref=e176]: List providers
+            - generic [ref=e177]:
+              - code [ref=e178]: waypoi models <providerId>
+              - generic [ref=e179]: List models in one provider
+            - generic [ref=e180]:
+              - code [ref=e181]: waypoi models add <providerId> ...
+              - generic [ref=e182]: Add a provider-owned model
+            - generic [ref=e183]:
+              - code [ref=e184]: waypoi models update <providerId> <modelRef>
+              - generic [ref=e185]: Update model routing/capabilities/auth
+            - generic [ref=e186]:
+              - code [ref=e187]: waypoi bench
+              - generic [ref=e188]: Run lightweight benchmark suite
+            - generic [ref=e189]:
+              - code [ref=e190]: waypoi chat --model smart
+              - generic [ref=e191]: Chat from the terminal (server must be running)
+            - generic [ref=e192]:
+              - code [ref=e193]: waypoi sessions
+              - generic [ref=e194]: List all chat sessions
+            - generic [ref=e195]:
+              - code [ref=e196]: waypoi sessions show <id>
+              - generic [ref=e197]: Print message history for a session
+            - generic [ref=e198]:
+              - code [ref=e199]: waypoi mcp add --name mytools --url http://...
+              - generic [ref=e200]: Register an MCP server
+        - generic [ref=e201]:
+          - generic [ref=e203]: Resources
+          - link "GitHub Repository" [ref=e205] [cursor=pointer]:
+            - /url: https://github.com/ziangziangziang/waypoi
+            - img [ref=e206]
+            - text: GitHub Repository
+      - generic [ref=e211]:
+        - generic [ref=e212]:
+          - heading "Add Provider" [level=3] [ref=e213]
+          - button [ref=e214] [cursor=pointer]:
+            - img [ref=e215]
+        - generic [ref=e219]:
+          - generic [ref=e220]:
+            - generic [ref=e221]:
+              - text: Provider ID
+              - generic [ref=e222]: Unique identifier, e.g. openrouter
+              - textbox "Provider ID Unique identifier, e.g. openrouter" [ref=e223]
+            - generic [ref=e224]:
+              - text: Display Name
+              - generic [ref=e225]: Friendly name (auto-filled from ID)
+              - textbox "Display Name Friendly name (auto-filled from ID)" [ref=e226]
+          - generic [ref=e227]:
+            - text: Base URL
+            - generic [ref=e228]:
+              - generic [ref=e229]: "Examples: https://api.openai.com/v1, http://localhost:11434"
+              - generic [ref=e230]:
+                - text: Discovery uses
+                - code [ref=e231]: /v1/models
+                - text: ", so root URLs and URLs already ending in"
+                - code [ref=e232]: /v1
+                - text: both work.
+            - generic [ref=e233]:
+              - 'textbox "Base URL Examples: https://api.openai.com/v1, http://localhost:11434 Discovery uses /v1/models, so root URLs and URLs already ending in /v1 both work. Auto-Detect" [ref=e234]'
+              - button "Auto-Detect" [ref=e235] [cursor=pointer]:
+                - img
+                - text: Auto-Detect
+          - generic [ref=e236]:
+            - generic [ref=e237]:
+              - text: API Format
+              - generic [ref=e238]: Select the API format this provider uses.
+            - generic [ref=e239]:
+              - button "OpenAI Compatible Routing Stream Standard OpenAI API format. Supports chat, embeddings, images, and audio. Chat Embeddings Images Image Edits +4" [ref=e240] [cursor=pointer]:
+                - generic [ref=e241]:
+                  - generic [ref=e242]:
+                    - img [ref=e243]
+                    - generic [ref=e245]: OpenAI Compatible
+                  - generic [ref=e246]:
+                    - generic [ref=e247]: Routing
+                    - generic [ref=e248]: Stream
+                - paragraph [ref=e249]: Standard OpenAI API format. Supports chat, embeddings, images, and audio.
+                - generic [ref=e250]:
+                  - generic [ref=e251]: Chat
+                  - generic [ref=e252]: Embeddings
+                  - generic [ref=e253]: Images
+                  - generic [ref=e254]: Image Edits
+                  - generic [ref=e255]: "+4"
+              - button "Inference V2 (KServe/Ray) Routing KServe v2 / Ray Serve inference format. Chat only, no streaming. Chat" [ref=e256] [cursor=pointer]:
+                - generic [ref=e257]:
+                  - generic [ref=e259]: Inference V2 (KServe/Ray)
+                  - generic [ref=e261]: Routing
+                - paragraph [ref=e262]: KServe v2 / Ray Serve inference format. Chat only, no streaming.
+                - generic [ref=e264]: Chat
+          - generic [ref=e265]:
+            - generic [ref=e266]:
+              - checkbox "Enabled" [checked] [ref=e267]
+              - generic [ref=e268]: Enabled
+            - generic [ref=e269]:
+              - text: API Key Override
+              - textbox "API Key Override" [ref=e270]
+          - group [ref=e271]:
+            - generic "Advanced Provider Fields" [ref=e272] [cursor=pointer]
+            - option "bearer" [selected]
+            - option "header"
+            - option "query"
+            - option "none"
+          - generic [ref=e273]:
+            - button "Cancel" [ref=e274] [cursor=pointer]
+            - button "Save Provider" [ref=e275] [cursor=pointer]

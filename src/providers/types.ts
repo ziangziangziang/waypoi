@@ -1,6 +1,6 @@
 import { EndpointType, ModelCapabilities, ModelModality } from "../types";
 
-export type ProviderProtocol = "openai" | "inference_v2" | "unknown";
+export type ProviderProtocol = "openai" | "inference_v2" | "dashscope" | "unknown";
 
 export type ProviderAuthType = "bearer" | "query" | "header" | "none";
 
@@ -20,12 +20,16 @@ export interface ProviderProtocolConfig {
 export interface ProviderLimits {
   requests?: {
     perMinute?: number;
+    perHour?: number;
     perDay?: number;
+    perWeek?: number;
     perMonth?: number;
   };
   tokens?: {
     perMinute?: number;
+    perHour?: number;
     perDay?: number;
+    perWeek?: number;
     perMonth?: number;
   };
   concurrent?: number;

@@ -1,0 +1,88 @@
+$id: alibaba-dashscope
+name: Alibaba Cloud Model Studio (DashScope Native)
+description: Wan series models for image and video generation via DashScope native API
+docs: https://www.alibabacloud.com/help/en/model-studio/wan-image-generation-api-reference
+endpoint:
+  baseUrl: https://dashscope-intl.aliyuncs.com
+  protocol: dashscope
+auth:
+  type: bearer
+  keyParam: Authorization
+env: DASHSCOPE_API_KEY
+models:
+  - id: wan2.6-image
+    upstream: wan2.6-image
+    free: false
+    modalities:
+      - text-to-image
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 60.0
+  - id: wan2.6-i2v-flash
+    upstream: wan2.6-i2v-flash
+    free: false
+    modalities:
+      - text-to-video
+      - image-to-video
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 58.0
+  - id: wan2.6-i2v
+    upstream: wan2.6-i2v
+    free: false
+    modalities:
+      - text-to-video
+      - image-to-video
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 57.0
+  - id: wan2.6-t2v
+    upstream: wan2.6-t2v
+    free: false
+    modalities:
+      - text-to-video
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 56.0
+  - id: wan2.5-i2v-preview
+    upstream: wan2.5-i2v-preview
+    free: false
+    modalities:
+      - text-to-video
+      - image-to-video
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 55.0
+  - id: wan2.5-t2v-preview
+    upstream: wan2.5-t2v-preview
+    free: false
+    modalities:
+      - text-to-video
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 54.0
+  - id: wan2.2-i2v-plus
+    upstream: wan2.2-i2v-plus
+    free: false
+    modalities:
+      - text-to-video
+      - image-to-video
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 50.0
+  - id: wan2.2-t2v-plus
+    upstream: wan2.2-t2v-plus
+    free: false
+    modalities:
+      - text-to-video
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 49.0

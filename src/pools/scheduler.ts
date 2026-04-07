@@ -313,8 +313,12 @@ function getCandidateState(
     rateLimitHits: 0,
     minuteRequests: 0,
     minuteTokens: 0,
+    hourRequests: 0,
+    hourTokens: 0,
     dayRequests: 0,
     dayTokens: 0,
+    weekRequests: 0,
+    weekTokens: 0,
   };
   states[candidateId] = created;
   return created;
@@ -330,6 +334,15 @@ function refreshWindows(state: PoolCandidateState, now: number): void {
     state.minuteTokens = 0;
   }
 
+  const hourStart = state.hourWindowStartedAt
+    ? new Date(state.hourWindowStartedAt).getTime()
+    : Number.NaN;
+  if (!Number.isFinite(hourStart) || now - hourStart >= 3_600_000) {
+    state.hourWindowStartedAt = new Date(now).toISOString();
+    state.hourRequests = 0;
+    state.hourTokens = 0;
+  }
+
   const dayStart = state.dayWindowStartedAt
     ? new Date(state.dayWindowStartedAt).getTime()
     : Number.NaN;
@@ -337,6 +350,15 @@ function refreshWindows(state: PoolCandidateState, now: number): void {
     state.dayWindowStartedAt = new Date(now).toISOString();
     state.dayRequests = 0;
     state.dayTokens = 0;
+  }
+
+  const weekStart = state.weekWindowStartedAt
+    ? new Date(state.weekWindowStartedAt).getTime()
+    : Number.NaN;
+  if (!Number.isFinite(weekStart) || now - weekStart >= 604_800_000) {
+    state.weekWindowStartedAt = new Date(now).toISOString();
+    state.weekRequests = 0;
+    state.weekTokens = 0;
   }
 
   if (state.cooldownUntil && new Date(state.cooldownUntil).getTime() <= now) {
@@ -350,8 +372,18 @@ function isRequestBudgetExhausted(candidate: PoolCandidate, state: PoolCandidate
       return true;
     }
   }
+  if (typeof candidate.limits?.requestsPerHour === "number") {
+    if (state.hourRequests >= candidate.limits.requestsPerHour) {
+      return true;
+    }
+  }
   if (typeof candidate.limits?.requestsPerDay === "number") {
     if (state.dayRequests >= candidate.limits.requestsPerDay) {
+      return true;
+    }
+  }
+  if (typeof candidate.limits?.requestsPerWeek === "number") {
+    if (state.weekRequests >= candidate.limits.requestsPerWeek) {
       return true;
     }
   }
@@ -360,8 +392,18 @@ function isRequestBudgetExhausted(candidate: PoolCandidate, state: PoolCandidate
       return true;
     }
   }
+  if (typeof candidate.limits?.tokensPerHour === "number") {
+    if (state.hourTokens >= candidate.limits.tokensPerHour) {
+      return true;
+    }
+  }
   if (typeof candidate.limits?.tokensPerDay === "number") {
     if (state.dayTokens >= candidate.limits.tokensPerDay) {
+      return true;
+    }
+  }
+  if (typeof candidate.limits?.tokensPerWeek === "number") {
+    if (state.weekTokens >= candidate.limits.tokensPerWeek) {
       return true;
     }
   }

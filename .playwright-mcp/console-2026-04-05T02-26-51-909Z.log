@@ -1,0 +1,76 @@
+[    2022ms] [WARNING] document.domain mutation is ignored because the surrounding agent cluster is origin-keyed. @ https://modelstudio.console.alibabacloud.com/ap-southeast-1?tab=api:112
+[    2023ms] [LOG] ██╗  ██╗██╗                                     
+██║  ██║██║                                     
+███████║██║                                     
+██╔══██║██║                                     
+██║  ██║██║▄█╗                                  
+╚═╝  ╚═╝╚═╝╚═╝                                  
+                                                
+██████╗  █████╗ ██╗██╗     ██╗ █████╗ ███╗   ██╗
+██╔══██╗██╔══██╗██║██║     ██║██╔══██╗████╗  ██║
+██████╔╝███████║██║██║     ██║███████║██╔██╗ ██║
+██╔══██╗██╔══██║██║██║     ██║██╔══██║██║╚██╗██║
+██████╔╝██║  ██║██║███████╗██║██║  ██║██║ ╚████║
+╚═════╝ ╚═╝  ╚═╝╚═╝╚══════╝╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝
+                                                 @ https://g.alicdn.com/isipfe/efm-fe/3.4.232/noopconsole.js:0
+[    8757ms] [WARNING] [AES] 未监测到Aplus SDK @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/index.js:0
+[    8789ms] [WARNING] The provided value '*/*' is not a valid enum value of type XMLHttpRequestResponseType. @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/vendor.js:7
+[    8820ms] [LOG] SecurityError: Failed to read a named property 'hostname' from 'Location': Blocked a frame with origin "https://www.alibabacloud.com" from accessing a cross-origin frame.
+    at t (https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:107)
+    at Object.<anonymous> (https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:232)
+    at t (https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:107)
+    at https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:196
+    at https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:201 @ https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:4
+[    8857ms] [LOG] %c [APLUS] -- APLUS INIT SUCCESS background:#3B82FE; padding: 4px; padding-right: 8px; border-radius: 4px; color: #fff; @ :1
+[   10180ms] [ERROR] 找不到组件 AliyunComGlobalNavSearch @ https://website.alcasset.com/common/topbar/www.en-US.js:27
+[   10180ms] [LOG] {id: qfYRBPC4V181bVC5QgsR-, componentName: AliyunComGlobalNavSearch, props: Object, constraintRule: Object, exportId: qfYRBPC4V181bVC5QgsR-} @ https://website.alcasset.com/common/topbar/www.en-US.js:27
+[   11253ms] [LOG] inputEvent 挂载失败 SecurityError: Failed to read a named property 'AIAssistant' from 'Window': Blocked a frame with origin "https://www.alibabacloud.com" from accessing a cross-origin frame.
+    at is (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:83364)
+    at yc (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:102478)
+    at t.unstable_runWithPriority (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:127:3844)
+    at Go (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:45102)
+    at gc (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:102237)
+    at ec (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:93762)
+    at https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:45393
+    at t.unstable_runWithPriority (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:127:3844)
+    at Go (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:45102)
+    at Vo (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:45338) @ https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:156
+[   11884ms] [ERROR] Permissions policy violation: gyroscope is not allowed in this document. @ https://g.alicdn.com/secdev/sufei_data/3.9.14/index.js:0
+[   11884ms] [ERROR] Permissions policy violation: accelerometer is not allowed in this document. @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/index.js:0
+[   11884ms] [WARNING] The deviceorientation events are blocked by permissions policy. See https://github.com/w3c/webappsec-permissions-policy/blob/master/features.md#sensor-features @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/index.js:0
+[   11996ms] [LOG] Sat Apr 04 2026 21:27:03 GMT-0500 (Central Daylight Time) @ https://g.alicdn.com/AWSC/et/1.83.41/et_f.js:1
+[   12097ms] [WARNING] [GSI_LOGGER]: Your client application may not display Google One Tap when FedCM becomes mandatory. Opt-in to FedCM to test that you have the proper cross-origin permission policy set up. Ignore this message if One Tap is displayed after opt-in to FedCM. Learn more: (https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#cross_origin) @ https://accounts.google.com/gsi/client:80
+[   12099ms] [ERROR] [GSI_LOGGER]: FedCM get() rejects with NotAllowedError: The 'identity-credentials-get' feature is not enabled in this document. @ https://accounts.google.com/gsi/client:81
+[   14233ms] [WARNING] single-spa minified message #1: See https://single-spa.js.org/error/?code=1 @ https://o.alicdn.com/alicloud-components/alps-csr-helper/index.min.js:0
+[  327627ms] [WARNING] The ScriptProcessorNode is deprecated. Use AudioWorkletNode instead. (https://bit.ly/audio-worklet) @ https://g.alicdn.com/AWSC/fireyejs/1.231.69/fireyejs.js:0
+[  329575ms] [WARNING] [AES] 未监测到Aplus SDK @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/index.js:0
+[  329585ms] [WARNING] The provided value '*/*' is not a valid enum value of type XMLHttpRequestResponseType. @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/vendor.js:7
+[  329592ms] [LOG] SecurityError: Failed to read a named property 'hostname' from 'Location': Blocked a frame with origin "https://www.alibabacloud.com" from accessing a cross-origin frame.
+    at t (https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:107)
+    at Object.<anonymous> (https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:232)
+    at t (https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:107)
+    at https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:196
+    at https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:5:201 @ https://g.alicdn.com/??alicloud-components/kloud/0.1.29/vendor/requirejs/require.js,alicloud-components/kloud/0.1.29/vendor/jquery/jquery.min.js,alicloud-components/acApp/0.3.5/app.js:4
+[  329643ms] [LOG] %c [APLUS] -- APLUS INIT SUCCESS background:#3B82FE; padding: 4px; padding-right: 8px; border-radius: 4px; color: #fff; @ :1
+[  330006ms] [ERROR] 找不到组件 AliyunComGlobalNavSearch @ https://website.alcasset.com/common/topbar/www.en-US.js:27
+[  330007ms] [LOG] {id: qfYRBPC4V181bVC5QgsR-, componentName: AliyunComGlobalNavSearch, props: Object, constraintRule: Object, exportId: qfYRBPC4V181bVC5QgsR-} @ https://website.alcasset.com/common/topbar/www.en-US.js:27
+[  330531ms] [LOG] Deprecated as of 10.7.0. highlightBlock will be removed entirely in v12.0 @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/vendor.js:19
+[  330531ms] [LOG] Deprecated as of 10.7.0. Please use highlightElement now. @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/vendor.js:19
+[  330975ms] [WARNING] [GSI_LOGGER]: Your client application may not display Google One Tap when FedCM becomes mandatory. Opt-in to FedCM to test that you have the proper cross-origin permission policy set up. Ignore this message if One Tap is displayed after opt-in to FedCM. Learn more: (https://developers.google.com/identity/gsi/web/guides/fedcm-migration?s=dc#cross_origin) @ https://accounts.google.com/gsi/client:80
+[  330976ms] [ERROR] [GSI_LOGGER]: FedCM get() rejects with NotAllowedError: The 'identity-credentials-get' feature is not enabled in this document. @ https://accounts.google.com/gsi/client:81
+[  331055ms] [ERROR] Permissions policy violation: gyroscope is not allowed in this document. @ https://g.alicdn.com/secdev/sufei_data/3.9.14/index.js:0
+[  331056ms] [ERROR] Permissions policy violation: accelerometer is not allowed in this document. @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/index.js:0
+[  331056ms] [WARNING] The deviceorientation events are blocked by permissions policy. See https://github.com/w3c/webappsec-permissions-policy/blob/master/features.md#sensor-features @ https://g.alicdn.com/aliyun-help/help-portal-fe/0.12.39/js/index.js:0
+[  331087ms] [LOG] Sat Apr 04 2026 21:32:22 GMT-0500 (Central Daylight Time) @ https://g.alicdn.com/AWSC/et/1.83.41/et_f.js:1
+[  331139ms] [LOG] inputEvent 挂载失败 SecurityError: Failed to read a named property 'AIAssistant' from 'Window': Blocked a frame with origin "https://www.alibabacloud.com" from accessing a cross-origin frame.
+    at is (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:83364)
+    at yc (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:102478)
+    at t.unstable_runWithPriority (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:127:3844)
+    at Go (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:45102)
+    at gc (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:102237)
+    at ec (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:93762)
+    at https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:45393
+    at t.unstable_runWithPriority (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:127:3844)
+    at Go (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:45102)
+    at Vo (https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:119:45338) @ https://g.alicdn.com/aliyun-com/alfa-aliyun-one-service-widget-chat/1.44.2/index.js:156
+[  334694ms] [WARNING] single-spa minified message #1: See https://single-spa.js.org/error/?code=1 @ https://o.alicdn.com/alicloud-components/alps-csr-helper/index.min.js:0

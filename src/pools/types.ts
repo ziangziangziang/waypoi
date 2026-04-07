@@ -26,21 +26,29 @@ export interface PoolCandidate {
   scoreSource: "benchmark.livebench" | "fallback";
   limits?: {
     requestsPerMinute?: number;
+    requestsPerHour?: number;
     requestsPerDay?: number;
+    requestsPerWeek?: number;
     tokensPerMinute?: number;
+    tokensPerHour?: number;
     tokensPerDay?: number;
+    tokensPerWeek?: number;
     timeoutMs?: number;
   };
 }
 
 export interface PoolDefinition {
   id: string;
+  name: string;
   aliases: string[];
-  strategy: "highest_rank_available";
+  enabled: boolean;
+  strategy: "highest_rank_available" | "remaining_limit";
   requiredInput: ModelModality[];
   requiredOutput: ModelModality[];
   scoreFallback: number;
   candidates: PoolCandidate[];
+  candidateSelection: string[];
+  userDefined: boolean;
   updatedAt: string;
 }
 
@@ -59,11 +67,17 @@ export interface PoolCandidateState {
   latencyMsEwma?: number;
   cooldownUntil?: string;
   minuteWindowStartedAt?: string;
+  hourWindowStartedAt?: string;
   dayWindowStartedAt?: string;
+  weekWindowStartedAt?: string;
   minuteRequests: number;
   minuteTokens: number;
+  hourRequests: number;
+  hourTokens: number;
   dayRequests: number;
   dayTokens: number;
+  weekRequests: number;
+  weekTokens: number;
   lastError?: string;
   lastUsedAt?: string;
 }

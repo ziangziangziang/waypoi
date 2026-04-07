@@ -72,7 +72,12 @@ export interface BenchmarkScenario {
   tools?: string[];
   maxIterations?: number;
   temperature?: number;
+  top_p?: number;
   max_tokens?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  seed?: number;
+  stop?: string | string[];
 
   // embeddings
   input?: string | string[];
@@ -103,6 +108,13 @@ export interface BenchmarkCliOptions {
   listExamples?: boolean;
   updateCapCache?: boolean;
   capTtlDays?: number;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  seed?: number;
+  stop?: string | string[];
 }
 
 export interface BenchmarkDefaults {
@@ -110,7 +122,12 @@ export interface BenchmarkDefaults {
   toolTimeoutMs: number;
   maxIterations: number;
   temperature: number;
+  top_p: number;
   max_tokens: number;
+  presence_penalty: number;
+  frequency_penalty: number;
+  seed?: number;
+  stop?: string | string[];
 }
 
 export interface BenchmarkProfileSettings {
@@ -153,6 +170,13 @@ export interface BenchmarkConfigFile {
     listExamples?: boolean;
     updateCapCache?: boolean;
     capTtlDays?: number;
+    temperature?: number;
+    top_p?: number;
+    max_tokens?: number;
+    presence_penalty?: number;
+    frequency_penalty?: number;
+    seed?: number;
+    stop?: string | string[];
   };
 }
 
@@ -167,6 +191,13 @@ export interface BenchmarkRunPlan {
   listExamples?: boolean;
   updateCapCache?: boolean;
   capTtlDays?: number;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  seed?: number;
+  stop?: string | string[];
 }
 
 export interface EffectiveBenchmarkConfig {

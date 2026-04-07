@@ -46,6 +46,13 @@ waypoi bench --mode diagnostic --baseline ~/.config/waypoi/benchmarks/bench-2026
 - `--baseline <path>` previous benchmark report for p95/throughput deltas.
 - `--update-cap-cache` persist capability findings to `$WAYPOI_DIR/capabilities`.
 - `--cap-ttl-days <n>` capability TTL override for freshness (default `7`).
+- `--temperature <n>` run-level generation override for supported modes.
+- `--top-p <n>` run-level generation override (`0..1`) for supported modes.
+- `--max-tokens <n>` run-level generation override (`>=1`) for supported modes.
+- `--presence-penalty <n>` run-level generation override (`-2..2`) for supported modes.
+- `--frequency-penalty <n>` run-level generation override (`-2..2`) for supported modes.
+- `--seed <n>` optional run-level deterministic seed (`>=0`) for supported modes.
+- `--stop <value>` optional stop sequence (string) or comma-separated list in UI.
 
 ## Showcase examples
 
@@ -126,6 +133,13 @@ Validation behavior:
 - schema errors fail fast with `file + index + field`
 - unknown fields become warnings
 
+Generation parameter precedence for supported modes (`chat`, `agent`, `responses`, `omni_call`):
+
+1. scenario-level value
+2. run-level override
+3. config defaults
+4. built-in defaults
+
 ### Example: showcase responses scenario
 
 ```json
@@ -175,7 +189,10 @@ Reports now include:
 
 The Benchmark UI is optimized for:
 
-- selecting one example
+- guided suite selection (showcase or diagnostic suite)
+- selecting one showcase example when applicable
+- tuning generation parameters (temperature, top_p, max_tokens, penalties, seed, stop)
+- using an Advanced section for model override, scenario files, profile, and capability cache controls
 - watching the live trace
 - reading the exact scenario input
 - inspecting tool calls and tool results

@@ -1,0 +1,64 @@
+$id: alibaba-llm
+name: Alibaba Cloud Model Studio (OpenAI Compatible)
+description: Qwen series models via OpenAI-compatible interface
+docs: https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope
+endpoint:
+  baseUrl: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+  protocol: openai
+auth:
+  type: bearer
+  keyParam: Authorization
+env: DASHSCOPE_API_KEY
+models:
+  - id: qwen3-max
+    upstream: qwen3-max
+    free: false
+    modalities:
+      - text-to-text
+    capabilities:
+      streaming: true
+      tools: true
+    benchmark:
+      livebench: 72.0
+  - id: qwen-plus
+    upstream: qwen-plus
+    free: false
+    modalities:
+      - text-to-text
+    capabilities:
+      streaming: true
+      tools: true
+    benchmark:
+      livebench: 68.0
+  - id: qwen-flash
+    upstream: qwen-flash
+    free: false
+    modalities:
+      - text-to-text
+    capabilities:
+      streaming: true
+      tools: true
+    benchmark:
+      livebench: 62.0
+  - id: qwen3.5-plus
+    upstream: qwen3.5-plus
+    free: false
+    modalities:
+      - text-to-text
+      - image-to-text
+    capabilities:
+      streaming: true
+      tools: true
+      vision: true
+    benchmark:
+      livebench: 70.0
+  - id: qwen3-coder-plus
+    upstream: qwen3-coder-plus
+    free: false
+    modalities:
+      - text-to-text
+    capabilities:
+      streaming: true
+      tools: true
+    benchmark:
+      livebench: 65.0

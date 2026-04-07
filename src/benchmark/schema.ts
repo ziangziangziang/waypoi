@@ -27,7 +27,12 @@ const SCENARIO_KEYS = new Set([
   "tools",
   "maxIterations",
   "temperature",
+  "top_p",
   "max_tokens",
+  "presence_penalty",
+  "frequency_penalty",
+  "seed",
+  "stop",
   "input",
   "n",
   "size",
@@ -122,7 +127,22 @@ function validateScenario(
   scenario.tools = optionalStringArray(input.tools, `${ctx}.tools`);
   scenario.maxIterations = optionalInteger(input.maxIterations, `${ctx}.maxIterations`, 1, 20);
   scenario.temperature = optionalFiniteNumber(input.temperature, `${ctx}.temperature`);
+  scenario.top_p = optionalFiniteNumber(input.top_p, `${ctx}.top_p`, 0, 1);
   scenario.max_tokens = optionalInteger(input.max_tokens, `${ctx}.max_tokens`, 1);
+  scenario.presence_penalty = optionalFiniteNumber(
+    input.presence_penalty,
+    `${ctx}.presence_penalty`,
+    -2,
+    2
+  );
+  scenario.frequency_penalty = optionalFiniteNumber(
+    input.frequency_penalty,
+    `${ctx}.frequency_penalty`,
+    -2,
+    2
+  );
+  scenario.seed = optionalInteger(input.seed, `${ctx}.seed`, 0);
+  scenario.stop = optionalStopField(input.stop, `${ctx}.stop`);
   scenario.requiresAvailableTools = optionalBoolean(
     input.requiresAvailableTools,
     `${ctx}.requiresAvailableTools`
@@ -376,12 +396,48 @@ function optionalInteger(
   return num;
 }
 
-function optionalFiniteNumber(value: unknown, field: string): number | undefined {
+function optionalFiniteNumber(
+  value: unknown,
+  field: string,
+  min?: number,
+  max?: number
+): number | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`${field}: expected finite number.`);
   }
+  if (typeof min === "number" && value < min) {
+    throw new Error(`${field}: must be >= ${min}.`);
+  }
+  if (typeof max === "number" && value > max) {
+    throw new Error(`${field}: must be <= ${max}.`);
+  }
   return value;
+}
+
+function optionalStopField(value: unknown, field: string): string | string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      throw new Error(`${field}: expected non-empty string.`);
+    }
+    return trimmed;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`${field}: expected string or string array.`);
+  }
+  if (value.length === 0) {
+    throw new Error(`${field}: expected at least one stop sequence.`);
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      throw new Error(`${field}[${index}]: expected non-empty string.`);
+    }
+    return entry.trim();
+  });
 }

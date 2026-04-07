@@ -45,8 +45,14 @@ export function inferCapabilities(
     if (isTtsModelName(name)) {
       return { input: ["text"], output: ["audio"] };
     }
-    // Default audio fallback favors transcription-like behavior.
     return { input: ["audio"], output: ["text"] };
+  }
+
+  if (endpointType === "video") {
+    if (isImageToVideoModelName(name)) {
+      return { input: ["text", "image"], output: ["video"] };
+    }
+    return { input: ["text"], output: ["video"] };
   }
 
   if (isVisionModelName(name)) {
@@ -97,7 +103,7 @@ function normalizeCapabilities(
 }
 
 function normalizeModalities(modalities: ModelModality[]): ModelModality[] {
-  const allowed: ModelModality[] = ["text", "image", "audio", "embedding"];
+  const allowed: ModelModality[] = ["text", "image", "audio", "embedding", "video"];
   const unique = new Set<ModelModality>();
 
   for (const modality of modalities) {
@@ -124,6 +130,15 @@ function isVisionModelName(name: string): boolean {
     name.includes("vl") ||
     name.includes("omni") ||
     name.includes("multimodal")
+  );
+}
+
+function isImageToVideoModelName(name: string): boolean {
+  return (
+    name.includes("i2v") ||
+    name.includes("image-to-video") ||
+    name.includes("img2vid") ||
+    name.includes("kf2v")
   );
 }
 

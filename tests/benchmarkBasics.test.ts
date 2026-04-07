@@ -27,6 +27,9 @@ test('benchmark config defaults to showcase execution mode', async () => {
   assert.equal(resolved.run.suite, 'showcase')
   assert.equal(resolved.run.executionMode, 'showcase')
   assert.equal(resolved.defaults.maxIterations, 6)
+  assert.equal(resolved.defaults.top_p, 1)
+  assert.equal(resolved.defaults.presence_penalty, 0)
+  assert.equal(resolved.defaults.frequency_penalty, 0)
 })
 
 test('showcase example catalog is tiny-qa-backed and capability suite has no concurrent probes', () => {
@@ -43,6 +46,27 @@ test('showcase example catalog is tiny-qa-backed and capability suite has no con
   assert.ok(!capabilityIds.some((id) => id.includes('concurrent') || id.includes('under_load')))
 })
 
+test('benchmark config accepts run-level generation overrides', async () => {
+  const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'waypoi-bench-config-'))
+  const resolved = await resolveBenchmarkConfig(makePaths(baseDir), {
+    temperature: 0.4,
+    top_p: 0.8,
+    max_tokens: 256,
+    presence_penalty: 0.3,
+    frequency_penalty: -0.4,
+    seed: 9,
+    stop: ['END', 'STOP'],
+  })
+
+  assert.equal(resolved.run.temperature, 0.4)
+  assert.equal(resolved.run.top_p, 0.8)
+  assert.equal(resolved.run.max_tokens, 256)
+  assert.equal(resolved.run.presence_penalty, 0.3)
+  assert.equal(resolved.run.frequency_penalty, -0.4)
+  assert.equal(resolved.run.seed, 9)
+  assert.deepEqual(resolved.run.stop, ['END', 'STOP'])
+})
+
 test('scenario validation accepts showcase metadata, responses mode, and tool-name assertions', () => {
   const outcome = validateScenarioCollection(
     [
@@ -57,6 +81,13 @@ test('scenario validation accepts showcase metadata, responses mode, and tool-na
         successCriteria: 'Returns HTTP 200',
         expectedHighlights: ['wire request', 'output_text'],
         prompt: 'Say hello from responses.',
+        temperature: 0.3,
+        top_p: 0.9,
+        max_tokens: 128,
+        presence_penalty: 0.2,
+        frequency_penalty: -0.1,
+        seed: 42,
+        stop: ['END'],
         assertions: {
           statusCode: 200,
         },
@@ -78,6 +109,8 @@ test('scenario validation accepts showcase metadata, responses mode, and tool-na
 
   assert.equal(outcome.scenarios.length, 2)
   assert.equal(outcome.scenarios[0].mode, 'responses')
+  assert.equal(outcome.scenarios[0].top_p, 0.9)
+  assert.deepEqual(outcome.scenarios[0].stop, ['END'])
   assert.deepEqual(outcome.scenarios[1].assertions.requiredToolNames, ['weather'])
   assert.equal(outcome.scenarios[1].requiresAvailableTools, true)
 })

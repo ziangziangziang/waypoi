@@ -47,6 +47,8 @@ Use stable typed errors:
 - `invalid_request`: parameter validation and contract violations.
 - `no_diffusion_model`: no suitable model available for image generation.
 - `no_vision_model`: no suitable vision-capable text model available for image understanding.
+- `no_video_model`: no suitable video generation model available.
+- `no_video_output`: video generation completed but no video URL was returned.
 - `upstream_error`: upstream/provider failures not attributable to caller input.
 - `forbidden`: endpoint/policy access denied (for route-level guards).
 
@@ -54,7 +56,7 @@ Error messages should be deterministic and actionable.
 
 ## 5) Operational behavior
 
-- Tool handlers should define explicit timeout behavior (for example 60s for image generation).
+- Tool handlers should define explicit timeout behavior (for example 60s for image generation, 300s for video generation).
 - Do not silently degrade into inline-only success for binary tools.
 - For binary file-output modes, tools MAY override upstream response format to a byte-bearing format to guarantee file materialization.
 - Retry behavior should be explicit per tool. If no retries are implemented, fail deterministically.

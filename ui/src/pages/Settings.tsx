@@ -15,6 +15,13 @@ import {
   X,
   Plug,
   RefreshCw,
+  Search,
+  Cpu,
+  Palette,
+  Headphones,
+  BarChart3,
+  AlertCircle,
+  Layers,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { EndpointUsageGuide } from '@/components/EndpointUsageGuide'
@@ -34,10 +41,12 @@ import {
   enableProviderModel,
   getAdminMeta,
   listProviders,
+  listProtocols,
   updateProvider,
   updateProviderModel,
   type Provider,
   type ProviderModel,
+  type ProtocolInfo,
   type EndpointType,
   type ModelModality,
   listMcpServers,
@@ -46,6 +55,12 @@ import {
   updateMcpServer,
   connectMcpServer,
   type McpServer,
+  listVirtualModels,
+  createVirtualModel,
+  updateVirtualModel,
+  deleteVirtualModel,
+  toggleVirtualModel,
+  type VirtualModel,
 } from '@/api/client'
 import {
   loadSettings,
@@ -79,13 +94,18 @@ type ProviderFormValues = {
   limitsText: string
 }
 
+type RateLimitRule = {
+  type: 'requests' | 'tokens'
+  value: string
+  unit: 'minute' | 'hour' | 'day' | 'week'
+}
+
 type ModelFormValues = {
   providerId: string
   modelId: string
   upstreamModel: string
   endpointType: EndpointType
   enabled: boolean
-  free: boolean
   baseUrl: string
   apiKey: string
   insecureTls: boolean
@@ -96,11 +116,13 @@ type ModelFormValues = {
   supportsTools: boolean
   supportsStreaming: boolean
   limitsText: string
+  rateLimitRules: RateLimitRule[]
 }
 
 export function Settings() {
   const [settings, setSettings] = useState<UserSettings>(loadSettings)
   const [providers, setProviders] = useState<Provider[]>([])
+  const [virtualModels, setVirtualModels] = useState<VirtualModel[]>([])
   const [version, setVersion] = useState<string>('0.0.0')
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set())
   const [isLoadingProviders, setIsLoadingProviders] = useState(true)
@@ -108,6 +130,7 @@ export function Settings() {
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [providerForm, setProviderForm] = useState<{ mode: 'create' | 'edit'; initial?: Provider } | null>(null)
   const [modelForm, setModelForm] = useState<{ provider: Provider; initial?: ProviderModel } | null>(null)
+  const [vmForm, setVmForm] = useState<{ mode: 'create' | 'edit'; initial?: VirtualModel } | null>(null)
 
   const handleImageSizeChange = (size: ImageSize) => {
     const updated = updateSetting('defaultImageSize', size)
@@ -118,8 +141,9 @@ export function Settings() {
     setIsLoadingProviders(true)
     setProviderError(null)
     try {
-      const [providerData, meta] = await Promise.all([listProviders(), getAdminMeta()])
+      const [providerData, meta, vmData] = await Promise.all([listProviders(), getAdminMeta(), listVirtualModels()])
       setProviders(providerData)
+      setVirtualModels(vmData)
       setVersion(meta.version)
       setExpandedProviders((previous) => {
         const next = new Set<string>()
@@ -388,6 +412,14 @@ export function Settings() {
             </div>
           </div>
 
+          <VirtualModelsPanel
+            virtualModels={virtualModels}
+            providers={providers}
+            onReload={() => void loadData()}
+            onCreate={() => setVmForm({ mode: 'create' })}
+            onEdit={(vm) => setVmForm({ mode: 'edit', initial: vm })}
+          />
+
           <McpServersPanel />
 
           <div className="panel">
@@ -486,6 +518,35 @@ export function Settings() {
           }}
         />
       )}
+
+      {vmForm && (
+        <VirtualModelFormDialog
+          title={vmForm.mode === 'create' ? 'Create Virtual Model' : `Edit Virtual Model ${vmForm.initial?.id}`}
+          initialValues={vmForm.mode === 'create' ? emptyVmForm() : vmToForm(vmForm.initial!)}
+          allProviderModels={providers.flatMap((p) =>
+            p.models.map((m) => ({
+              key: `${p.id}/${m.modelId}`,
+              providerId: p.id,
+              modelId: m.modelId,
+              endpointType: m.endpointType,
+              modalities: m.modalities ?? [],
+              capabilities: m.capabilities,
+            }))
+          )}
+          isEdit={vmForm.mode === 'edit'}
+          onClose={() => setVmForm(null)}
+          onSubmit={async (values) => {
+            const payload = parseVmForm(values)
+            if (vmForm.mode === 'create') {
+              await createVirtualModel(payload)
+            } else {
+              await updateVirtualModel(vmForm.initial!.id, payload)
+            }
+            setVmForm(null)
+            await loadData()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -499,6 +560,26 @@ function ProviderMeta(props: { label: string; value: string; mono?: boolean }) {
   )
 }
 
+const OPERATION_LABELS: Record<string, string> = {
+  chat_completions: 'Chat',
+  embeddings: 'Embeddings',
+  images_generation: 'Images',
+  images_edits: 'Image Edits',
+  images_variations: 'Image Vars',
+  audio_transcriptions: 'Transcribe',
+  audio_translations: 'Translate',
+  audio_speech: 'Speech',
+}
+
+function OperationBadge({ operation }: { operation: string }) {
+  const label = OPERATION_LABELS[operation] ?? operation
+  return (
+    <span className="text-2xs px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
+      {label}
+    </span>
+  )
+}
+
 function ProviderFormDialog(props: {
   title: string
   initialValues: ProviderFormValues
@@ -509,46 +590,236 @@ function ProviderFormDialog(props: {
   const [values, setValues] = useState<ProviderFormValues>(props.initialValues)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [protocols, setProtocols] = useState<ProtocolInfo[]>([])
+  const [detecting, setDetecting] = useState(false)
+  const [detectResult, setDetectResult] = useState<'success' | 'warning' | 'error' | null>(null)
+  const [detectMessage, setDetectMessage] = useState<string | null>(null)
+  const [protocolFilter, setProtocolFilter] = useState('')
+
+  useEffect(() => {
+    void listProtocols().then(setProtocols).catch(() => {
+      setProtocols([
+        { id: 'openai', label: 'OpenAI Compatible', description: 'Standard OpenAI API format.', operations: ['chat_completions', 'embeddings', 'images_generation'], streamOperations: ['chat_completions', 'embeddings', 'images_generation'], supportsRouting: true },
+        { id: 'inference_v2', label: 'Inference V2 (KServe/Ray)', description: 'KServe v2 / Ray Serve inference format.', operations: ['chat_completions'], streamOperations: [], supportsRouting: true },
+      ])
+    })
+  }, [])
 
   const setField = <K extends keyof ProviderFormValues>(key: K, value: ProviderFormValues[K]) => {
     setValues((current) => ({ ...current, [key]: value }))
   }
 
+  useEffect(() => {
+    if (!props.isEdit && values.id && !values.name) {
+      setValues((current) => ({ ...current, name: current.id }))
+    }
+  }, [values.id, values.name, props.isEdit])
+
+  const handleProtocolSelect = (protocolId: string) => {
+    const proto = protocols.find((p) => p.id === protocolId)
+    setValues((current) => ({
+      ...current,
+      protocol: protocolId,
+      supportsRouting: proto?.supportsRouting ?? current.supportsRouting,
+    }))
+  }
+
+  const handleAutoDetect = async () => {
+    if (!values.baseUrl.trim()) {
+      setDetectResult('error')
+      setDetectMessage('Enter a Base URL first')
+      return
+    }
+    setDetecting(true)
+    setDetectResult(null)
+    setDetectMessage(null)
+    setError(null)
+    try {
+      const normalizedBaseUrl = values.baseUrl.trim().replace(/\/+$/, '')
+      const headers: Record<string, string> = {}
+      if (values.apiKey.trim()) {
+        headers.authorization = `Bearer ${values.apiKey.trim()}`
+      }
+
+      let detected: string | null = null
+      let confidence: 'high' | 'low' = 'low'
+      try {
+        const v1Resp = await fetch(`${normalizedBaseUrl}/v1/models`, { headers })
+        if (v1Resp.ok) {
+          const json = await v1Resp.json()
+          if (json && typeof json === 'object' && Array.isArray((json as { data?: unknown }).data)) {
+            detected = 'openai'
+            confidence = 'high'
+          }
+        } else if (v1Resp.status === 401 || v1Resp.status === 403) {
+          detected = 'openai'
+          confidence = 'low'
+        }
+      } catch {
+        // ignore
+      }
+
+      if (!detected) {
+        try {
+          const v2Resp = await fetch(`${normalizedBaseUrl}/v2/models`, { headers })
+          if (v2Resp.ok) {
+            detected = 'inference_v2'
+            confidence = 'high'
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (detected && protocols.some((p) => p.id === detected)) {
+        handleProtocolSelect(detected)
+        setDetectResult(confidence === 'high' ? 'success' : 'warning')
+        const label = protocols.find((p) => p.id === detected)?.label ?? detected
+        setDetectMessage(confidence === 'high' ? `Detected: ${label}` : `Likely ${label} (auth required to confirm)`)
+      } else if (detected) {
+        setField('protocol', detected)
+        setDetectResult('warning')
+        setDetectMessage(`Detected: ${detected} (not in registry)`)
+      } else {
+        setDetectResult('error')
+        setDetectMessage('Could not detect API format. Select manually below.')
+      }
+    } catch (err) {
+      setDetectResult('error')
+      setDetectMessage('Detection failed. Select manually.')
+    } finally {
+      setDetecting(false)
+    }
+  }
+
+  const filteredProtocols = protocols.filter((p) =>
+    p.label.toLowerCase().includes(protocolFilter.toLowerCase()) ||
+    p.description.toLowerCase().includes(protocolFilter.toLowerCase())
+  )
+
   return (
     <Overlay title={props.title} onClose={props.onClose}>
       <div className="space-y-4">
         {error && <div className="text-sm text-destructive">{error}</div>}
+
         <div className="grid grid-cols-2 gap-3">
-          <LabeledField label="Provider ID">
+          <LabeledField label="Provider ID" description="Unique identifier, e.g. openrouter">
             <Input value={values.id} onChange={(event) => setField('id', event.target.value)} disabled={props.isEdit} />
           </LabeledField>
-          <LabeledField label="Name">
+          <LabeledField label="Display Name" description="Friendly name (auto-filled from ID)">
             <Input value={values.name} onChange={(event) => setField('name', event.target.value)} />
           </LabeledField>
-          <LabeledField
-            label="Base URL"
-            description={
-              <>
-                <span className="block font-mono">Examples: https://api.openai.com/v1, http://localhost:11434</span>
-                <span className="block">Discovery uses <code>/v1/models</code>, so root URLs and URLs already ending in <code>/v1</code> both work.</span>
-              </>
-            }
-          >
-            <Input value={values.baseUrl} onChange={(event) => setField('baseUrl', event.target.value)} />
-          </LabeledField>
-          <LabeledField label="Protocol">
-            <select className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={values.protocol} onChange={(event) => setField('protocol', event.target.value)}>
-              <option value="openai">openai</option>
-              <option value="inference_v2">inference_v2</option>
-              <option value="unknown">unknown</option>
-            </select>
-          </LabeledField>
-          <ToggleField label="Enabled" checked={values.enabled} onChange={(checked) => setField('enabled', checked)} />
-          <ToggleField label="Supports Routing" checked={values.supportsRouting} onChange={(checked) => setField('supportsRouting', checked)} />
         </div>
-        <LabeledField label="API Key Override">
-          <Input value={values.apiKey} onChange={(event) => setField('apiKey', event.target.value)} />
+
+        <LabeledField
+          label="Base URL"
+          description={
+            <>
+              <span className="block font-mono">Examples: https://api.openai.com/v1, http://localhost:11434</span>
+              <span className="block">Discovery uses <code>/v1/models</code>, so root URLs and URLs already ending in <code>/v1</code> both work.</span>
+            </>
+          }
+        >
+          <div className="flex gap-2">
+            <Input className="flex-1" value={values.baseUrl} onChange={(event) => setField('baseUrl', event.target.value)} />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleAutoDetect()}
+              disabled={detecting}
+              className="shrink-0 whitespace-nowrap"
+            >
+              <Search className="w-3.5 h-3.5 mr-1" />
+              {detecting ? 'Detecting…' : 'Auto-Detect'}
+            </Button>
+          </div>
         </LabeledField>
+
+        {detectResult && (
+          <div className={cn(
+            'flex items-center gap-2 rounded border px-3 py-2 text-xs',
+            detectResult === 'success' && 'border-green-500/40 bg-green-500/10 text-green-400',
+            detectResult === 'warning' && 'border-amber-500/40 bg-amber-500/10 text-amber-400',
+            detectResult === 'error' && 'border-destructive/40 bg-destructive/10 text-destructive',
+          )}>
+            {detectResult === 'success' && <Check className="w-3.5 h-3.5 shrink-0" />}
+            {detectResult === 'warning' && <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+            {detectResult === 'error' && <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+            {detectMessage}
+          </div>
+        )}
+
+        <div>
+          <label className="block space-y-1">
+            <span className="text-xs font-mono uppercase text-muted-foreground">API Format</span>
+            <span className="block text-xs text-muted-foreground">Select the API format this provider uses.</span>
+          </label>
+          {protocols.length > 4 && (
+            <Input
+              className="mt-2 h-8 text-sm"
+              placeholder="Search formats…"
+              value={protocolFilter}
+              onChange={(e) => setProtocolFilter(e.target.value)}
+            />
+          )}
+          <div className={cn('grid gap-2 mt-2', protocols.length > 2 ? 'grid-cols-2' : 'grid-cols-1')}>
+            {filteredProtocols.map((proto) => {
+              const isSelected = proto.id === values.protocol
+              return (
+                <button
+                  key={proto.id}
+                  type="button"
+                  onClick={() => handleProtocolSelect(proto.id)}
+                  className={cn(
+                    'rounded-lg border p-3 text-left transition-all',
+                    isSelected
+                      ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                      : 'border-border hover:border-primary/50 hover:bg-secondary/50'
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {isSelected && <Check className="w-4 h-4 text-primary shrink-0" />}
+                      <span className="font-medium text-sm">{proto.label}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={cn('text-2xs px-1.5 py-0.5 rounded', proto.supportsRouting ? 'bg-green-500/10 text-green-400' : 'bg-muted text-muted-foreground')}>
+                        Routing
+                      </span>
+                      {proto.streamOperations.length > 0 && (
+                        <span className="text-2xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">
+                          Stream
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">{proto.description}</p>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {proto.operations.slice(0, 4).map((op) => (
+                      <OperationBadge key={op} operation={op} />
+                    ))}
+                    {proto.operations.length > 4 && (
+                      <span className="text-2xs px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">
+                        +{proto.operations.length - 4}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+          {protocolFilter && filteredProtocols.length === 0 && (
+            <p className="text-xs text-muted-foreground mt-2">No formats match "{protocolFilter}"</p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <ToggleField label="Enabled" checked={values.enabled} onChange={(checked) => setField('enabled', checked)} />
+          <LabeledField label="API Key Override">
+            <Input value={values.apiKey} onChange={(event) => setField('apiKey', event.target.value)} />
+          </LabeledField>
+        </div>
+
         <details className="rounded border border-border p-3">
           <summary className="cursor-pointer text-sm font-medium">Advanced Provider Fields</summary>
           <div className="space-y-3 mt-3">
@@ -616,6 +887,13 @@ function ProviderFormDialog(props: {
   )
 }
 
+const ENDPOINT_TYPE_INFO: Record<EndpointType, { label: string; description: string; icon: typeof Cpu }> = {
+  llm: { label: 'LLM', description: 'Text generation, chat, reasoning', icon: Cpu },
+  diffusion: { label: 'Image', description: 'Image generation and editing', icon: Palette },
+  audio: { label: 'Audio', description: 'Speech-to-text, text-to-speech', icon: Headphones },
+  embedding: { label: 'Embedding', description: 'Vector embeddings for search/RAG', icon: BarChart3 },
+}
+
 function ModelFormDialog(props: {
   title: string
   provider: Provider
@@ -631,6 +909,7 @@ function ModelFormDialog(props: {
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
   const [discoveryBaseUrl, setDiscoveryBaseUrl] = useState<string | null>(null)
   const [discoveredModels, setDiscoveredModels] = useState<DiscoveredProviderModel[]>([])
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const setField = <K extends keyof ModelFormValues>(key: K, value: ModelFormValues[K]) => {
     setValues((current) => ({ ...current, [key]: value }))
@@ -685,57 +964,45 @@ function ModelFormDialog(props: {
     })
   }
 
+  const toggleModality = (field: 'inputCapabilities' | 'outputCapabilities', modality: ModelModality) => {
+    const current = new Set(parseCommaList(values[field]))
+    if (current.has(modality)) current.delete(modality)
+    else current.add(modality)
+    setField(field, Array.from(current).join(', '))
+  }
+
+  const inputModalities = new Set(parseCommaList(values.inputCapabilities))
+  const outputModalities = new Set(parseCommaList(values.outputCapabilities))
+
   return (
     <Overlay title={props.title} onClose={props.onClose}>
       <div className="space-y-4">
         {error && <div className="text-sm text-destructive">{error}</div>}
-        <div className="grid grid-cols-2 gap-3">
-          <LabeledField label="Model ID">
-            <Input value={values.modelId} onChange={(event) => setField('modelId', event.target.value)} />
-          </LabeledField>
-          <LabeledField label="Upstream Model">
-            <Input value={values.upstreamModel} onChange={(event) => setField('upstreamModel', event.target.value)} />
-          </LabeledField>
-          <LabeledField label="Endpoint Type">
-            <select className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={values.endpointType} onChange={(event) => setField('endpointType', event.target.value as EndpointType)}>
-              {ENDPOINT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </LabeledField>
-          <LabeledField label="Base URL Override">
-            <Input value={values.baseUrl} onChange={(event) => setField('baseUrl', event.target.value)} />
-          </LabeledField>
-          <ToggleField label="Enabled" checked={values.enabled} onChange={(checked) => setField('enabled', checked)} />
-          <ToggleField label="Free" checked={values.free} onChange={(checked) => setField('free', checked)} />
-          <ToggleField label="Supports Tools" checked={values.supportsTools} onChange={(checked) => setField('supportsTools', checked)} />
-          <ToggleField label="Supports Streaming" checked={values.supportsStreaming} onChange={(checked) => setField('supportsStreaming', checked)} />
-        </div>
-        <LabeledField label="API Key Override">
-          <Input value={values.apiKey} onChange={(event) => setField('apiKey', event.target.value)} />
-        </LabeledField>
+
         {props.allowDiscovery && (
           <div className="rounded border border-border p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium">Model Discovery</p>
+                <p className="text-sm font-medium">Discover Models</p>
                 <p className="text-xs text-muted-foreground">
-                  Fetches upstream models from <code>/v1/models</code> using this provider plus any URL, API key, or TLS overrides above.
+                  Fetch available models from <code>/v1/models</code>. Pick one to auto-fill the form.
                 </p>
               </div>
               <Button variant="outline" onClick={() => void handleDiscovery()} disabled={discovering || saving}>
-                {discovering ? 'Discovering…' : 'Model Discovery'}
+                {discovering ? 'Discovering…' : 'Discover'}
               </Button>
             </div>
             {discoveryError && <div className="text-sm text-destructive">{discoveryError}</div>}
             {discoveryBaseUrl && (
               <div className="text-xs text-muted-foreground">
-                Discovery source: <code>{discoveryBaseUrl}</code>
+                Source: <code>{discoveryBaseUrl}</code>
               </div>
             )}
             {discoveryBaseUrl && discoveredModels.length === 0 && !discoveryError && (
-              <div className="text-sm text-muted-foreground">No models were returned by the upstream <code>/v1/models</code> endpoint.</div>
+              <div className="text-sm text-muted-foreground">No models returned by upstream <code>/v1/models</code>.</div>
             )}
             {discoveredModels.length > 0 && (
-              <div className="space-y-2 max-h-64 overflow-auto pr-1">
+              <div className="space-y-1.5 max-h-48 overflow-auto pr-1">
                 {discoveredModels.map((model) => (
                   <button
                     key={model.id}
@@ -753,29 +1020,231 @@ function ModelFormDialog(props: {
             )}
           </div>
         )}
-        <details className="rounded border border-border p-3">
-          <summary className="cursor-pointer text-sm font-medium">Advanced Model Fields</summary>
-          <div className="space-y-3 mt-3">
-            <div className="grid grid-cols-2 gap-3">
-              <ToggleField label="Insecure TLS" checked={values.insecureTls} onChange={(checked) => setField('insecureTls', checked)} />
-              <LabeledField label="Aliases (comma-separated)">
-                <Input value={values.aliases} onChange={(event) => setField('aliases', event.target.value)} />
-              </LabeledField>
-              <LabeledField label="Modalities (comma-separated)">
-                <Input value={values.modalities} onChange={(event) => setField('modalities', event.target.value)} placeholder={MODALITY_OPTIONS.join(', ')} />
-              </LabeledField>
-              <LabeledField label="Capabilities Input (comma-separated)">
-                <Input value={values.inputCapabilities} onChange={(event) => setField('inputCapabilities', event.target.value)} placeholder={MODALITY_OPTIONS.join(', ')} />
-              </LabeledField>
-              <LabeledField label="Capabilities Output (comma-separated)">
-                <Input value={values.outputCapabilities} onChange={(event) => setField('outputCapabilities', event.target.value)} placeholder={MODALITY_OPTIONS.join(', ')} />
+
+        <div className="grid grid-cols-2 gap-3">
+          <LabeledField label="Model ID" description="The model identifier used in API requests">
+            <Input
+              value={values.modelId}
+              onChange={(event) => {
+                const v = event.target.value
+                setValues((current) => ({
+                  ...current,
+                  modelId: v,
+                  upstreamModel: current.upstreamModel === current.modelId ? v : current.upstreamModel,
+                }))
+              }}
+            />
+          </LabeledField>
+          <LabeledField label="Endpoint Type">
+            <div className="grid grid-cols-2 gap-1.5">
+              {ENDPOINT_OPTIONS.map((option) => {
+                const info = ENDPOINT_TYPE_INFO[option]
+                const Icon = info.icon
+                const isSelected = values.endpointType === option
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setField('endpointType', option)}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded border px-2 py-1.5 text-xs transition-all',
+                      isSelected
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-border hover:border-primary/50 text-muted-foreground'
+                    )}
+                  >
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span className="font-medium">{info.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </LabeledField>
+        </div>
+
+        <div>
+          <label className="block">
+            <span className="text-xs font-mono uppercase text-muted-foreground">Capabilities</span>
+          </label>
+          <div className="grid grid-cols-2 gap-3 mt-2">
+            <div className="rounded border border-border p-2.5 space-y-1.5">
+              <p className="text-2xs font-mono uppercase text-muted-foreground">Input</p>
+              <div className="flex flex-wrap gap-1.5">
+                {MODALITY_OPTIONS.map((m) => {
+                  const active = inputModalities.has(m)
+                  return (
+                    <button
+                      key={`in-${m}`}
+                      type="button"
+                      onClick={() => toggleModality('inputCapabilities', m)}
+                      className={cn(
+                        'text-xs px-2 py-1 rounded border transition-all',
+                        active ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50'
+                      )}
+                    >
+                      {m}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="rounded border border-border p-2.5 space-y-1.5">
+              <p className="text-2xs font-mono uppercase text-muted-foreground">Output</p>
+              <div className="flex flex-wrap gap-1.5">
+                {MODALITY_OPTIONS.map((m) => {
+                  const active = outputModalities.has(m)
+                  return (
+                    <button
+                      key={`out-${m}`}
+                      type="button"
+                      onClick={() => toggleModality('outputCapabilities', m)}
+                      className={cn(
+                        'text-xs px-2 py-1 rounded border transition-all',
+                        active ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50'
+                      )}
+                    >
+                      {m}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <ToggleField label="Enabled" checked={values.enabled} onChange={(checked) => setField('enabled', checked)} />
+          <ToggleField label="Supports Tools" checked={values.supportsTools} onChange={(checked) => setField('supportsTools', checked)} />
+          <ToggleField label="Supports Streaming" checked={values.supportsStreaming} onChange={(checked) => setField('supportsStreaming', checked)} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <LabeledField label="API Key Override">
+            <Input value={values.apiKey} onChange={(event) => setField('apiKey', event.target.value)} />
+          </LabeledField>
+          <LabeledField label="Base URL Override">
+            <Input value={values.baseUrl} onChange={(event) => setField('baseUrl', event.target.value)} />
+          </LabeledField>
+        </div>
+
+        {!showAdvanced ? (
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(true)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Show advanced options (upstream override, aliases, rate limits…)
+          </button>
+        ) : (
+          <details open className="rounded border border-border p-3">
+            <summary className="cursor-pointer text-sm font-medium">Advanced Model Fields</summary>
+            <div className="space-y-3 mt-3">
+              <div className="grid grid-cols-2 gap-3">
+                <ToggleField label="Insecure TLS" checked={values.insecureTls} onChange={(checked) => setField('insecureTls', checked)} />
+                <LabeledField label="Upstream Model Override">
+                  <Input value={values.upstreamModel} onChange={(event) => setField('upstreamModel', event.target.value)} />
+                </LabeledField>
+                <LabeledField label="Aliases (comma-separated)">
+                  <Input value={values.aliases} onChange={(event) => setField('aliases', event.target.value)} />
+                </LabeledField>
+                <LabeledField label="Modalities (comma-separated)">
+                  <Input value={values.modalities} onChange={(event) => setField('modalities', event.target.value)} placeholder={MODALITY_OPTIONS.join(', ')} />
+                </LabeledField>
+              </div>
+
+              <div>
+                <label className="block">
+                  <span className="text-xs font-mono uppercase text-muted-foreground">Rate Limits</span>
+                </label>
+                <div className="mt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setField('rateLimitRules', [...values.rateLimitRules, { type: 'requests' as const, value: '', unit: 'minute' as const }])}
+                    className="mb-2"
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    Add Rule
+                  </Button>
+                  {values.rateLimitRules.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="grid grid-cols-12 gap-2 text-2xs font-mono uppercase text-muted-foreground px-1">
+                        <div className="col-span-3">Type</div>
+                        <div className="col-span-3">Value</div>
+                        <div className="col-span-4">Window</div>
+                        <div className="col-span-2"></div>
+                      </div>
+                      {values.rateLimitRules.map((rule, idx) => (
+                        <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                          <div className="col-span-3">
+                            <select
+                              className="w-full h-8 rounded border border-input bg-transparent px-2 text-xs"
+                              value={rule.type}
+                              onChange={(e) => {
+                                const rules = [...values.rateLimitRules]
+                                rules[idx] = { ...rule, type: e.target.value as 'requests' | 'tokens' }
+                                setField('rateLimitRules', rules)
+                              }}
+                            >
+                              <option value="requests">Requests</option>
+                              <option value="tokens">Tokens</option>
+                            </select>
+                          </div>
+                          <div className="col-span-3">
+                            <Input
+                              className="h-8 text-xs"
+                              type="number"
+                              value={rule.value}
+                              onChange={(e) => {
+                                const rules = [...values.rateLimitRules]
+                                rules[idx] = { ...rule, value: e.target.value }
+                                setField('rateLimitRules', rules)
+                              }}
+                              placeholder="0"
+                            />
+                          </div>
+                          <div className="col-span-4">
+                            <select
+                              className="w-full h-8 rounded border border-input bg-transparent px-2 text-xs"
+                              value={rule.unit}
+                              onChange={(e) => {
+                                const rules = [...values.rateLimitRules]
+                                rules[idx] = { ...rule, unit: e.target.value as RateLimitRule['unit'] }
+                                setField('rateLimitRules', rules)
+                              }}
+                            >
+                              <option value="minute">per minute</option>
+                              <option value="hour">per hour</option>
+                              <option value="day">per day</option>
+                              <option value="week">per week</option>
+                            </select>
+                          </div>
+                          <div className="col-span-2 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const rules = values.rateLimitRules.filter((_, i) => i !== idx)
+                                setField('rateLimitRules', rules)
+                              }}
+                              className="text-muted-foreground hover:text-destructive transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <LabeledField label="Limits (JSON, overrides above)">
+                <Textarea value={values.limitsText} onChange={(event) => setField('limitsText', event.target.value)} rows={4} />
               </LabeledField>
             </div>
-            <LabeledField label="Limits (JSON)">
-              <Textarea value={values.limitsText} onChange={(event) => setField('limitsText', event.target.value)} rows={4} />
-            </LabeledField>
-          </div>
-        </details>
+          </details>
+        )}
+
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={props.onClose} disabled={saving}>Cancel</Button>
           <Button
@@ -899,7 +1368,6 @@ function emptyModelForm(providerId: string): ModelFormValues {
     upstreamModel: '',
     endpointType: 'llm',
     enabled: true,
-    free: true,
     baseUrl: '',
     apiKey: '',
     insecureTls: false,
@@ -910,17 +1378,33 @@ function emptyModelForm(providerId: string): ModelFormValues {
     supportsTools: false,
     supportsStreaming: false,
     limitsText: '',
+    rateLimitRules: [],
   }
 }
 
 function modelToForm(provider: Provider, model: ProviderModel): ModelFormValues {
+  const rateLimitRules: RateLimitRule[] = []
+  if (model.limits) {
+    const unitMap: Record<string, 'minute' | 'hour' | 'day' | 'week'> = {
+      perMinute: 'minute', perHour: 'hour', perDay: 'day', perWeek: 'week', perMonth: 'day',
+    }
+    for (const [key, val] of Object.entries(model.limits.requests ?? {})) {
+      if (typeof val === 'number') {
+        rateLimitRules.push({ type: 'requests', value: String(val), unit: unitMap[key] ?? 'minute' })
+      }
+    }
+    for (const [key, val] of Object.entries(model.limits.tokens ?? {})) {
+      if (typeof val === 'number') {
+        rateLimitRules.push({ type: 'tokens', value: String(val), unit: unitMap[key] ?? 'minute' })
+      }
+    }
+  }
   return {
     providerId: provider.id,
     modelId: model.modelId,
     upstreamModel: model.upstreamModel,
     endpointType: model.endpointType,
     enabled: model.enabled !== false,
-    free: model.free,
     baseUrl: model.baseUrl ?? '',
     apiKey: model.apiKey ?? '',
     insecureTls: model.insecureTls === true,
@@ -931,6 +1415,7 @@ function modelToForm(provider: Provider, model: ProviderModel): ModelFormValues 
     supportsTools: model.capabilities.supportsTools === true,
     supportsStreaming: model.capabilities.supportsStreaming === true,
     limitsText: model.limits ? JSON.stringify(model.limits, null, 2) : '',
+    rateLimitRules,
   }
 }
 
@@ -973,13 +1458,35 @@ function parseModelForm(values: ModelFormValues) {
   const input = parseModalities(values.inputCapabilities, 'input capabilities')
   const output = parseModalities(values.outputCapabilities, 'output capabilities')
   const modalities = parseModalities(values.modalities, 'modalities')
-  const limits = values.limitsText.trim() ? parseJson(values.limitsText, 'model limits') : undefined
+  const limitsFromText = values.limitsText.trim() ? parseJson(values.limitsText, 'model limits') : undefined
+  const unitMap: Record<string, string> = {
+    minute: 'perMinute', hour: 'perHour', day: 'perDay', week: 'perWeek',
+  }
+  const limits: Record<string, unknown> = limitsFromText ?? {}
+  const rules = values.rateLimitRules.filter((r) => r.value.trim())
+  if (rules.length > 0) {
+    const requestLimits: Record<string, number> = {}
+    const tokenLimits: Record<string, number> = {}
+    for (const rule of rules) {
+      const key = unitMap[rule.unit]
+      if (key) {
+        if (rule.type === 'requests') {
+          requestLimits[key] = Number(rule.value)
+        } else {
+          tokenLimits[key] = Number(rule.value)
+        }
+      }
+    }
+    if (!limits.requests) limits.requests = {}
+    if (!limits.tokens) limits.tokens = {}
+    Object.assign(limits.requests as Record<string, unknown>, requestLimits)
+    Object.assign(limits.tokens as Record<string, unknown>, tokenLimits)
+  }
   return {
     modelId: values.modelId.trim(),
     upstreamModel: values.upstreamModel.trim(),
     endpointType: values.endpointType,
     enabled: values.enabled,
-    free: values.free,
     baseUrl: values.baseUrl.trim(),
     apiKey: values.apiKey.trim() || undefined,
     insecureTls: values.insecureTls || undefined,
@@ -991,7 +1498,7 @@ function parseModelForm(values: ModelFormValues) {
       supportsTools: values.supportsTools || undefined,
       supportsStreaming: values.supportsStreaming || undefined,
     },
-    limits,
+    limits: Object.keys(limits).length > 0 ? limits : undefined,
   }
 }
 
@@ -1048,6 +1555,281 @@ function formatDiscoveryCapabilities(model: DiscoveredProviderModel): string {
     model.capabilities.supportsStreaming === true ? 'streaming' : null,
   ].filter(Boolean)
   return parts.join(' • ') || 'No capability metadata returned'
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Virtual Models Panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+function VirtualModelsPanel(props: {
+  virtualModels: VirtualModel[]
+  providers: Provider[]
+  onReload: () => void
+  onCreate: () => void
+  onEdit: (vm: VirtualModel) => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const run = async (key: string, fn: () => Promise<void>) => {
+    setBusy(key)
+    try { await fn(); props.onReload() }
+    catch { /* errors handled by parent */ }
+    finally { setBusy(null) }
+  }
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <Layers className="w-4 h-4 text-muted-foreground" />
+        <span className="panel-title">Virtual Models</span>
+        <span className="text-2xs text-muted-foreground ml-auto">{props.virtualModels.length} virtual models</span>
+        <Button size="sm" variant="outline" onClick={props.onCreate}>
+          <Plus className="w-3.5 h-3.5 mr-1" />
+          Create Virtual Model
+        </Button>
+      </div>
+      <div className="p-4 space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Virtual models act as a single model backed by one or more real models. Useful for A/B testing and aggregating usage across providers.
+        </p>
+        {props.virtualModels.length === 0 && (
+          <div className="rounded border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+            No virtual models configured.
+          </div>
+        )}
+        {props.virtualModels.map((vm) => {
+          const candidateNames = vm.candidates.map((c) => `${c.providerId}/${c.modelId}`)
+          return (
+            <div key={vm.id} className="rounded-lg border border-border overflow-hidden">
+              <div className="px-4 py-3 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className={cn('status-dot', vm.enabled ? 'status-dot-live' : 'status-dot-down')} />
+                    <p className="font-medium text-sm">{vm.name}</p>
+                    <span className="text-2xs uppercase text-muted-foreground">{vm.id}</span>
+                  </div>
+                  <p className="text-2xs text-muted-foreground mt-1">
+                    {vm.candidates.length} candidate{vm.candidates.length !== 1 ? 's' : ''} · {vm.strategy.replace(/_/g, ' ')}
+                  </p>
+                  {candidateNames.length > 0 && (
+                    <p className="text-2xs text-muted-foreground mt-0.5 truncate font-mono">
+                      {candidateNames.join(', ')}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy === `toggle:${vm.id}`}
+                    onClick={() => void run(`toggle:${vm.id}`, async () => {
+                      await toggleVirtualModel(vm.id)
+                    })}
+                  >
+                    <Power className="w-3.5 h-3.5 mr-1" />
+                    {vm.enabled ? 'Disable' : 'Enable'}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => props.onEdit(vm)}>
+                    <Pencil className="w-3.5 h-3.5 mr-1" />
+                    Edit
+                  </Button>
+                  {vm.userDefined && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-destructive hover:text-destructive"
+                      disabled={busy === `delete:${vm.id}`}
+                      onClick={() => {
+                        if (!window.confirm(`Delete virtual model ${vm.id}?`)) return
+                        void run(`delete:${vm.id}`, async () => {
+                          await deleteVirtualModel(vm.id)
+                        })
+                      }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 mr-1" />
+                      Delete
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function VirtualModelFormDialog(props: {
+  title: string
+  initialValues: VmFormValues
+  allProviderModels: Array<{ key: string; providerId: string; modelId: string; endpointType: EndpointType; modalities: string[]; capabilities: { input: string[]; output: string[] } }>
+  isEdit: boolean
+  onClose: () => void
+  onSubmit: (values: VmFormValues) => Promise<void>
+}) {
+  const [values, setValues] = useState<VmFormValues>(props.initialValues)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [filter, setFilter] = useState<string>('all')
+  const [search, setSearch] = useState('')
+
+  const setField = <K extends keyof VmFormValues>(key: K, value: VmFormValues[K]) => {
+    setValues((current) => ({ ...current, [key]: value }))
+  }
+
+  const toggleCandidate = (key: string) => {
+    const sel = new Set(values.candidateSelection)
+    if (sel.has(key)) sel.delete(key)
+    else sel.add(key)
+    setField('candidateSelection', Array.from(sel))
+  }
+
+  const filteredModels = props.allProviderModels.filter((m) => {
+    if (filter !== 'all' && m.endpointType !== filter) return false
+    if (search && !m.key.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
+  const groupedByProvider = new Map<string, typeof filteredModels>()
+  for (const m of filteredModels) {
+    const list = groupedByProvider.get(m.providerId) ?? []
+    list.push(m)
+    groupedByProvider.set(m.providerId, list)
+  }
+
+  const selectedCount = values.candidateSelection.length
+  const providerCount = new Set(values.candidateSelection.map((k) => k.split('/')[0])).size
+
+  return (
+    <Overlay title={props.title} onClose={props.onClose}>
+      <div className="space-y-4">
+        {error && <div className="text-sm text-destructive">{error}</div>}
+        <div className="grid grid-cols-2 gap-3">
+          <LabeledField label="Virtual Model ID" description="Unique identifier used in API requests">
+            <Input value={values.id} onChange={(event) => setField('id', event.target.value)} disabled={props.isEdit} />
+          </LabeledField>
+          <LabeledField label="Display Name" description="Friendly name shown in the UI">
+            <Input value={values.name} onChange={(event) => setField('name', event.target.value)} />
+          </LabeledField>
+        </div>
+        <LabeledField label="Strategy">
+          <select className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={values.strategy} onChange={(event) => setField('strategy', event.target.value as VmFormValues['strategy'])}>
+            <option value="highest_rank_available">Highest Rank Available</option>
+            <option value="remaining_limit">Remaining Limit (failover on quota exhausted)</option>
+          </select>
+        </LabeledField>
+
+        <div>
+          <label className="block">
+            <span className="text-xs font-mono uppercase text-muted-foreground">Backend Models</span>
+          </label>
+          <div className="flex items-center gap-2 mt-2">
+            <select className="h-8 rounded border border-input bg-transparent px-2 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
+              <option value="all">All types</option>
+              {ENDPOINT_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+            <Input className="h-8 text-sm" placeholder="Search models…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <div className="mt-2 space-y-2 max-h-64 overflow-auto pr-1">
+            {Array.from(groupedByProvider.entries()).map(([providerId, models]) => {
+              const selectedInGroup = models.filter((m) => values.candidateSelection.includes(m.key)).length
+              return (
+                <div key={providerId} className="rounded border border-border">
+                  <div className="px-3 py-1.5 bg-secondary/50 text-xs font-medium text-muted-foreground">
+                    {providerId} ({selectedInGroup}/{models.length} selected)
+                  </div>
+                  {models.map((m) => {
+                    const isSelected = values.candidateSelection.includes(m.key)
+                    const inputStr = m.capabilities.input?.join('+') ?? '?'
+                    const outputStr = m.capabilities.output?.join('+') ?? '?'
+                    return (
+                      <button
+                        key={m.key}
+                        type="button"
+                        onClick={() => toggleCandidate(m.key)}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors border-t border-border/50',
+                          isSelected ? 'bg-primary/5' : 'hover:bg-secondary/30'
+                        )}
+                      >
+                        <input type="checkbox" checked={isSelected} readOnly className="shrink-0" />
+                        <span className="font-mono flex-1 truncate">{m.modelId}</span>
+                        <span className="text-2xs uppercase text-muted-foreground shrink-0">{m.endpointType}</span>
+                        <span className="text-2xs text-muted-foreground shrink-0">{inputStr} → {outputStr}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+          {selectedCount > 0 && (
+            <p className="text-xs text-muted-foreground mt-2">
+              {selectedCount} model{selectedCount !== 1 ? 's' : ''} selected across {providerCount} provider{providerCount !== 1 ? 's' : ''}
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={props.onClose} disabled={saving}>Cancel</Button>
+          <Button
+            onClick={async () => {
+              setSaving(true)
+              setError(null)
+              try {
+                await props.onSubmit(values)
+              } catch (err) {
+                setError(getErrorMessage(err, 'Failed to save virtual model'))
+              } finally {
+                setSaving(false)
+              }
+            }}
+            disabled={saving}
+          >
+            {props.isEdit ? 'Update' : 'Create'} Virtual Model
+          </Button>
+        </div>
+      </div>
+    </Overlay>
+  )
+}
+
+type VmFormValues = {
+  id: string
+  name: string
+  strategy: 'highest_rank_available' | 'remaining_limit'
+  candidateSelection: string[]
+}
+
+function emptyVmForm(): VmFormValues {
+  return {
+    id: '',
+    name: '',
+    strategy: 'highest_rank_available',
+    candidateSelection: [],
+  }
+}
+
+function vmToForm(vm: VirtualModel): VmFormValues {
+  return {
+    id: vm.id,
+    name: vm.name,
+    strategy: vm.strategy,
+    candidateSelection: vm.candidateSelection ?? [],
+  }
+}
+
+function parseVmForm(values: VmFormValues) {
+  if (!values.id.trim()) {
+    throw new Error('Virtual Model ID is required')
+  }
+  return {
+    id: values.id.trim(),
+    name: values.name.trim() || values.id.trim(),
+    strategy: values.strategy,
+    candidateSelection: values.candidateSelection,
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

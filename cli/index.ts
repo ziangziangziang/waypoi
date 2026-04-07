@@ -2033,6 +2033,13 @@ program
   .option("--baseline <path>", "Baseline benchmark JSON for regression comparison")
   .option("--update-cap-cache", "Persist capability findings to capability cache")
   .option("--cap-ttl-days <n>", "Capability cache TTL days for freshness/output", parseInt)
+  .option("--temperature <n>", "Run-level temperature override", parseFloat)
+  .option("--top-p <n>", "Run-level top_p override", parseFloat)
+  .option("--max-tokens <n>", "Run-level max_tokens override", parseInt)
+  .option("--presence-penalty <n>", "Run-level presence penalty override", parseFloat)
+  .option("--frequency-penalty <n>", "Run-level frequency penalty override", parseFloat)
+  .option("--seed <n>", "Run-level seed override", parseInt)
+  .option("--stop <value>", "Run-level stop sequence override (comma-separated for multiple)")
   .action(async (options) => {
     await ensureStorageDir(paths);
     try {
@@ -2053,6 +2060,15 @@ program
       }
 
       const { report, artifactPath, textArtifactPath } = await runBenchmark(paths, {
+        temperature: options.temperature,
+        top_p: options.topP,
+        max_tokens: options.maxTokens,
+        presence_penalty: options.presencePenalty,
+        frequency_penalty: options.frequencyPenalty,
+        seed: options.seed,
+        stop: typeof options.stop === "string"
+          ? options.stop.split(",").map((item: string) => item.trim()).filter(Boolean)
+          : undefined,
         suite: options.suite,
         exampleId: options.example,
         scenarioPath: options.scenario,
@@ -2528,7 +2544,7 @@ function capabilitiesToModalities(capabilities: ModelCapabilities): string[] {
 }
 
 function defaultCapabilitiesForEndpointType(
-  endpointType: "llm" | "diffusion" | "audio" | "embedding"
+  endpointType: "llm" | "diffusion" | "audio" | "embedding" | "video"
 ): ModelCapabilities {
   if (endpointType === "embedding") {
     return { input: ["text"], output: ["embedding"], source: "configured" };
@@ -2538,6 +2554,9 @@ function defaultCapabilitiesForEndpointType(
   }
   if (endpointType === "audio") {
     return { input: ["audio"], output: ["text"], source: "configured" };
+  }
+  if (endpointType === "video") {
+    return { input: ["text"], output: ["video"], source: "configured" };
   }
   return {
     input: ["text"],
@@ -2574,10 +2593,10 @@ function parseCapabilitySpecs(values: string[]): ModelCapabilities {
 }
 
 function parseModality(value: string): ModelModality {
-  if (value === "text" || value === "image" || value === "audio" || value === "embedding") {
+  if (value === "text" || value === "image" || value === "audio" || value === "embedding" || value === "video") {
     return value;
   }
-  throw new Error(`Unsupported modality '${value}'. Use one of: text,image,audio,embedding.`);
+  throw new Error(`Unsupported modality '${value}'. Use one of: text,image,audio,embedding,video.`);
 }
 
 function normalizeAliasList(values: string[]): string[] {
@@ -2612,7 +2631,12 @@ function isAudioModel(model: string): boolean {
   return name.includes("whisper") || name.includes("tts") || name.includes("speech");
 }
 
-async function resolveModelType(model: string): Promise<"llm" | "diffusion" | "audio" | "embedding"> {
+function isVideoModel(model: string): boolean {
+  const name = model.toLowerCase();
+  return name.includes("wan") || name.includes("video") || name.includes("i2v") || name.includes("t2v");
+}
+
+async function resolveModelType(model: string): Promise<"llm" | "diffusion" | "audio" | "embedding" | "video"> {
   const providerModels = await listModelsForApi(paths);
   const providerMatch = providerModels.find((entry) => entry.id === model || entry.aliases.includes(model));
   if (providerMatch) {
@@ -2627,13 +2651,15 @@ async function resolveModelType(model: string): Promise<"llm" | "diffusion" | "a
   }
   if (isImageModel(model)) return "diffusion";
   if (isAudioModel(model)) return "audio";
+  if (isVideoModel(model)) return "video";
   return "llm";
 }
 
-function normalizeType(value: string): "llm" | "diffusion" | "audio" | "embedding" {
+function normalizeType(value: string): "llm" | "diffusion" | "audio" | "embedding" | "video" {
   if (value === "diffusion") return "diffusion";
   if (value === "audio") return "audio";
   if (value === "embedding") return "embedding";
+  if (value === "video") return "video";
   return "llm";
 }
 

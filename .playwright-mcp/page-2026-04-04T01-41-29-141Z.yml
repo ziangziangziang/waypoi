@@ -1,0 +1,77 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - img "Waypoi" [ref=e7]
+      - generic [ref=e8]:
+        - heading "WAYPOINT" [level=1] [ref=e9]
+        - paragraph [ref=e10]: v0.7.1-beta.0
+    - navigation [ref=e11]:
+      - link "Playground" [ref=e12] [cursor=pointer]:
+        - /url: /ui/playground
+        - img [ref=e13]
+        - generic [ref=e15]: Playground
+      - link "Benchmark" [ref=e16] [cursor=pointer]:
+        - /url: /ui/benchmark
+        - img [ref=e17]
+        - generic [ref=e20]: Benchmark
+      - link "Dashboard" [ref=e21] [cursor=pointer]:
+        - /url: /ui/dashboard
+        - img [ref=e22]
+        - generic [ref=e27]: Dashboard
+      - link "Peek" [ref=e28] [cursor=pointer]:
+        - /url: /ui/peek
+        - img [ref=e29]
+        - generic [ref=e32]: Peek
+      - link "Settings" [ref=e33] [cursor=pointer]:
+        - /url: /ui/settings
+        - img [ref=e34]
+        - generic [ref=e37]: Settings
+    - generic [ref=e39]:
+      - img [ref=e40]
+      - generic [ref=e46]: Status
+      - generic [ref=e49]: live
+  - main [ref=e50]:
+    - generic [ref=e51]:
+      - complementary [ref=e52]:
+        - generic [ref=e53]:
+          - generic [ref=e54]: Sessions
+          - button [ref=e55] [cursor=pointer]:
+            - img
+        - button "New Chat" [ref=e57] [cursor=pointer]:
+          - img
+          - text: New Chat
+        - generic [ref=e59] [cursor=pointer]:
+          - img [ref=e60]
+          - generic [ref=e62]:
+            - paragraph [ref=e63]: whas missing in the UI
+            - paragraph [ref=e64]: 2 messages
+          - button [ref=e65]:
+            - img
+      - generic [ref=e66]:
+        - generic [ref=e67]:
+          - generic [ref=e68]:
+            - img [ref=e69]
+            - heading "Playground" [level=2] [ref=e71]
+            - generic [ref=e72]: Generating title...
+          - button "Agent Mode" [ref=e73] [cursor=pointer]:
+            - img [ref=e74]
+            - text: Agent Mode
+          - combobox [ref=e77]:
+            - option "cerebras/zai-glm-4.7 [text->text]" [selected]
+            - option "pcai/qwen35-27b [text+image->text]"
+            - option "smart [image+text->text]"
+        - generic [ref=e79]:
+          - generic [ref=e82]:
+            - img [ref=e84]
+            - generic [ref=e87]:
+              - heading "Ready to chat" [level=3] [ref=e88]
+              - paragraph [ref=e89]: Select a model and start a conversation
+              - paragraph [ref=e90]: Supports images via drag, drop, paste, or upload
+          - generic [ref=e91]:
+            - generic [ref=e92]:
+              - button "Attach image" [ref=e93] [cursor=pointer]:
+                - img
+              - textbox "Type a message... (paste or drop images)" [ref=e94]
+              - button [disabled]:
+                - img
+            - paragraph [ref=e95]: Enter to send | Shift+Enter for new line
