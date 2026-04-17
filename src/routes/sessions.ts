@@ -34,6 +34,8 @@ import { pickBestModelByCapabilities } from "../storage/repositories";
  *   POST   /admin/images             - Store image in cache
  *   GET    /admin/images/stats       - Get image cache stats
  *   DELETE /admin/images             - Clear image cache
+ *   GET    /data/media/:hash         - Public cached media access
+ *   GET    /data/images/:hash        - Public cached image access
  */
 
 export async function registerSessionRoutes(app: FastifyInstance): Promise<void> {
@@ -291,8 +293,38 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
   // ─────────────────────────────────────────────────────────────────────────────
   // Media cache (/admin/media) with image alias compatibility (/admin/images)
   // ─────────────────────────────────────────────────────────────────────────────
+  registerPublicMediaRoute("/data/media");
+  registerPublicMediaRoute("/data/images");
   registerMediaCacheRoutes("/admin/media");
   registerMediaCacheRoutes("/admin/images");
+
+  function registerPublicMediaRoute(prefix: "/data/media" | "/data/images"): void {
+    app.get(
+      `${prefix}/:hash`,
+      async (req: FastifyRequest<{ Params: { hash: string } }>, reply: FastifyReply) => {
+        try {
+          const filePath = await getMediaPath(paths, req.params.hash);
+          const entry = await getMediaEntry(paths, req.params.hash);
+          if (!filePath || !entry) {
+            return reply.status(404).send({
+              error: { message: "Media not found", type: "not_found" },
+            });
+          }
+
+          const buffer = await fs.readFile(filePath);
+          return reply
+            .header("Content-Type", entry.mimeType || guessMimeType(filePath))
+            .header("Cache-Control", "public, max-age=31536000, immutable")
+            .send(buffer);
+        } catch (error) {
+          app.log.error(error, "Failed to get public media");
+          return reply.status(500).send({
+            error: { message: "Failed to get media", type: "internal_error" },
+          });
+        }
+      }
+    );
+  }
 
   function registerMediaCacheRoutes(prefix: "/admin/media" | "/admin/images"): void {
     app.get(`${prefix}/stats`, async (_req: FastifyRequest, reply: FastifyReply) => {

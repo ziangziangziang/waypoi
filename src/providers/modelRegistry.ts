@@ -247,10 +247,6 @@ export async function getAvailableSmartPool(paths: StoragePaths): Promise<SmartP
         return false;
       }
     }
-    const requiresApiKey = (candidate.auth?.type ?? "bearer") !== "none";
-    if (requiresApiKey && !candidate.apiKey) {
-      return false;
-    }
     return true;
   });
 
@@ -298,7 +294,7 @@ async function buildAndFilterCandidates(
     }
     if (candidate.providerModelId) {
       const health = modelHealth[candidate.providerModelId];
-      if (health?.status === "down") {
+      if (health?.status === "down" && shouldRespectHealthStatus(candidate.protocol)) {
         continue;
       }
     }
@@ -307,10 +303,6 @@ async function buildAndFilterCandidates(
     }
     const adapter = getProtocolAdapter(candidate.protocol);
     if (!candidate.supportsRouting || !adapter) {
-      continue;
-    }
-    const requiresApiKey = (candidate.auth?.type ?? "bearer") !== "none";
-    if (requiresApiKey && !candidate.apiKey) {
       continue;
     }
     if (!supportsRequirements(candidate.capabilities, requirements)) {
@@ -336,6 +328,10 @@ async function buildAndFilterCandidates(
     }
     return a.id.localeCompare(b.id);
   });
+}
+
+function shouldRespectHealthStatus(protocol: string): boolean {
+  return protocol !== "dashscope";
 }
 
 function buildCandidate(provider: ProviderRecord, model: ProviderModelRecord): PoolCandidate {

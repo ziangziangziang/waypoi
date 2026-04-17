@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import { promises as fs } from "fs";
 import {
+  materializeRemoteImageOutputs,
   normalizeChatImagePayload,
   normalizeImageGenerationPayload,
 } from "../src/services/imageGeneration";
@@ -104,4 +105,70 @@ test("normalizeChatImagePayload throws when chat payload has no image output", (
       }),
     /did not return any image output/
   );
+});
+
+test("materializeRemoteImageOutputs rewrites local admin urls to /data urls", async () => {
+  const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "waypoi-img-mat-"));
+  const paths = makePaths(baseDir);
+  const materialized = await materializeRemoteImageOutputs(
+    paths,
+    {
+      data: [{ url: "/admin/images/abcdef0123456789" }],
+    },
+    "url"
+  ) as {
+    data: Array<{ url?: string }>;
+  };
+
+  assert.equal(materialized.data[0]?.url, "/data/images/abcdef0123456789");
+});
+
+test("materializeRemoteImageOutputs returns b64_json for cached local urls when requested", async () => {
+  const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "waypoi-img-mat-"));
+  const paths = makePaths(baseDir);
+  const stored = await import("../src/storage/imageCache").then(({ storeMedia }) =>
+    storeMedia(paths, "data:image/png;base64,AAA=")
+  );
+
+  const materialized = await materializeRemoteImageOutputs(
+    paths,
+    {
+      data: [{ url: `/data/images/${stored.hash}` }],
+    },
+    "b64_json"
+  ) as {
+    data: Array<{ url?: string; b64_json?: string }>;
+  };
+
+  assert.equal(materialized.data[0]?.url, `/data/images/${stored.hash}`);
+  assert.equal(materialized.data[0]?.b64_json, "AAA=");
+});
+
+test("materializeRemoteImageOutputs falls back to remote url when fetch returns non-image content", async () => {
+  const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "waypoi-img-mat-"));
+  const paths = makePaths(baseDir);
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async () =>
+    new Response("<!DOCTYPE html><html><body>blocked</body></html>", {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    })) as typeof fetch;
+
+  try {
+    const materialized = await materializeRemoteImageOutputs(
+      paths,
+      {
+        data: [{ url: "https://example.com/generated.png" }],
+      },
+      "b64_json"
+    ) as {
+      data: Array<{ url?: string; b64_json?: string }>;
+    };
+
+    assert.equal(materialized.data[0]?.url, "https://example.com/generated.png");
+    assert.equal(materialized.data[0]?.b64_json, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

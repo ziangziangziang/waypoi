@@ -3,6 +3,7 @@ import { StoragePaths, loadProviderHealth, saveProviderHealth } from "../storage
 import { ProviderModelHealth } from "../types";
 import { listProviders } from "./repository";
 import { getEffectiveModelInsecureTls } from "./repository";
+import { ProviderProtocol } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -91,6 +92,27 @@ export async function probeProviderModels(
     Array.from(targets.values()).map(async (target) => {
       const start = Date.now();
       try {
+        if (!supportsHealthProbe(target.protocol)) {
+          for (const model of target.models) {
+            await updateProviderModelHealthCheck(
+              paths,
+              model.providerModelId,
+              "up",
+              null,
+              undefined,
+              undefined
+            );
+            results.push({
+              providerModelId: model.providerModelId,
+              providerId: model.providerId,
+              modelId: model.modelId,
+              baseUrl: target.baseUrl,
+              status: "up",
+              latencyMs: null,
+            });
+          }
+          return;
+        }
         const dispatcher = target.insecureTls
           ? new Agent({ connect: { rejectUnauthorized: false } })
           : undefined;
@@ -157,6 +179,7 @@ export async function probeProviderModels(
 }
 
 type HealthProbeTarget = {
+  protocol: ProviderProtocol;
   baseUrl: string;
   apiKey?: string;
   insecureTls?: boolean;
@@ -183,6 +206,7 @@ function collectTargets(
       const insecureTls = getEffectiveModelInsecureTls(provider, model);
       const key = `${baseUrl}@@${apiKey ? "key" : "nokey"}@@${insecureTls ? "insecure" : "secure"}`;
       const entry = targets.get(key) ?? {
+        protocol: provider.protocol,
         baseUrl,
         apiKey,
         insecureTls,
@@ -197,6 +221,10 @@ function collectTargets(
     }
   }
   return targets;
+}
+
+function supportsHealthProbe(protocol: ProviderProtocol): boolean {
+  return protocol === "openai" || protocol === "inference_v2";
 }
 
 function ewma(previous: number | undefined, next: number, alpha = 0.2): number {

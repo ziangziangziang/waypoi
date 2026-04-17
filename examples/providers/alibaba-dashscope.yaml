@@ -1,7 +1,7 @@
 $id: alibaba-dashscope
 name: Alibaba Cloud Model Studio (DashScope Native)
-description: Wan series models for image and video generation via DashScope native API
-docs: https://www.alibabacloud.com/help/en/model-studio/wan-image-generation-api-reference
+description: Qwen image/image-editing, Wan video generation, and Qwen ASR via DashScope native APIs
+docs: https://www.alibabacloud.com/help/en/model-studio/qwen-image-api
 endpoint:
   baseUrl: https://dashscope-intl.aliyuncs.com
   protocol: dashscope
@@ -10,27 +10,37 @@ auth:
   keyParam: Authorization
 env: DASHSCOPE_API_KEY
 models:
-  - id: wan2.6-image
-    upstream: wan2.6-image
+  - id: qwen-image-2.0-pro
+    upstream: qwen-image-2.0-pro
+    free: false
+    modalities:
+      - text-to-image
+      - image-to-image
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 60.0
+  - id: qwen-image-2.0
+    upstream: qwen-image-2.0
+    free: false
+    modalities:
+      - text-to-image
+      - image-to-image
+    capabilities:
+      streaming: false
+    benchmark:
+      livebench: 59.0
+  - id: qwen-image-max
+    upstream: qwen-image-max
     free: false
     modalities:
       - text-to-image
     capabilities:
       streaming: false
     benchmark:
-      livebench: 60.0
-  - id: wan2.6-i2v-flash
-    upstream: wan2.6-i2v-flash
-    free: false
-    modalities:
-      - text-to-video
-      - image-to-video
-    capabilities:
-      streaming: false
-    benchmark:
       livebench: 58.0
-  - id: wan2.6-i2v
-    upstream: wan2.6-i2v
+  - id: wan2.7-i2v
+    upstream: wan2.7-i2v
     free: false
     modalities:
       - text-to-video
@@ -39,8 +49,8 @@ models:
       streaming: false
     benchmark:
       livebench: 57.0
-  - id: wan2.6-t2v
-    upstream: wan2.6-t2v
+  - id: wan2.7-t2v
+    upstream: wan2.7-t2v
     free: false
     modalities:
       - text-to-video
@@ -48,41 +58,21 @@ models:
       streaming: false
     benchmark:
       livebench: 56.0
-  - id: wan2.5-i2v-preview
-    upstream: wan2.5-i2v-preview
+  - id: qwen3-asr-flash
+    upstream: qwen3-asr-flash
     free: false
     modalities:
-      - text-to-video
-      - image-to-video
+      - audio-to-text
     capabilities:
       streaming: false
     benchmark:
       livebench: 55.0
-  - id: wan2.5-t2v-preview
-    upstream: wan2.5-t2v-preview
+  - id: qwen3-asr-flash-realtime
+    upstream: qwen3-asr-flash-realtime
     free: false
     modalities:
-      - text-to-video
+      - audio-to-text
     capabilities:
       streaming: false
     benchmark:
       livebench: 54.0
-  - id: wan2.2-i2v-plus
-    upstream: wan2.2-i2v-plus
-    free: false
-    modalities:
-      - text-to-video
-      - image-to-video
-    capabilities:
-      streaming: false
-    benchmark:
-      livebench: 50.0
-  - id: wan2.2-t2v-plus
-    upstream: wan2.2-t2v-plus
-    free: false
-    modalities:
-      - text-to-video
-    capabilities:
-      streaming: false
-    benchmark:
-      livebench: 49.0

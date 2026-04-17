@@ -52,7 +52,9 @@ export async function runVideoGeneration(
     signal,
     {
       endpointType: "video",
-      requiredInput: ["text"],
+      requiredInput: request.image_url || (Array.isArray(request.media) && request.media.length > 0)
+        ? ["text", "image"]
+        : ["text"],
       requiredOutput: ["video"],
     }
   );

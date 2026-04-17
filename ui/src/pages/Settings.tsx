@@ -348,7 +348,7 @@ export function Settings() {
                                       <Code2 className="w-3.5 h-3.5 text-muted-foreground" />
                                       <p className="text-xs font-mono">{canonical}</p>
                                       <span className="text-2xs uppercase text-muted-foreground">{model.endpointType}</span>
-                                      <span className="text-2xs text-muted-foreground">upstream {model.upstreamModel}</span>
+                                      <span className="text-2xs text-muted-foreground">provider model {model.upstreamModel}</span>
                                     </div>
                                     <div className="text-2xs text-muted-foreground mt-1">
                                       {(model.modalities ?? []).join(', ') || 'no modalities'}
@@ -1022,19 +1022,24 @@ function ModelFormDialog(props: {
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <LabeledField label="Model ID" description="The model identifier used in API requests">
+          <LabeledField
+            label="Model ID"
+            description="Name shown in Waypoi and used in client requests (you can keep this short)."
+          >
             <Input
               value={values.modelId}
-              onChange={(event) => {
-                const v = event.target.value
-                setValues((current) => ({
-                  ...current,
-                  modelId: v,
-                  upstreamModel: current.upstreamModel === current.modelId ? v : current.upstreamModel,
-                }))
-              }}
+              onChange={(event) => setField('modelId', event.target.value)}
             />
           </LabeledField>
+          <LabeledField
+            label="Upstream Model ID"
+            description="Provider model name sent upstream (for example, the exact model id from /v1/models)."
+          >
+            <Input value={values.upstreamModel} onChange={(event) => setField('upstreamModel', event.target.value)} />
+          </LabeledField>
+        </div>
+
+        <div>
           <LabeledField label="Endpoint Type">
             <div className="grid grid-cols-2 gap-1.5">
               {ENDPOINT_OPTIONS.map((option) => {
@@ -1133,7 +1138,7 @@ function ModelFormDialog(props: {
             onClick={() => setShowAdvanced(true)}
             className="text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            Show advanced options (upstream override, aliases, rate limits…)
+            Show advanced options (aliases, rate limits…)
           </button>
         ) : (
           <details open className="rounded border border-border p-3">
@@ -1141,9 +1146,6 @@ function ModelFormDialog(props: {
             <div className="space-y-3 mt-3">
               <div className="grid grid-cols-2 gap-3">
                 <ToggleField label="Insecure TLS" checked={values.insecureTls} onChange={(checked) => setField('insecureTls', checked)} />
-                <LabeledField label="Upstream Model Override">
-                  <Input value={values.upstreamModel} onChange={(event) => setField('upstreamModel', event.target.value)} />
-                </LabeledField>
                 <LabeledField label="Aliases (comma-separated)">
                   <Input value={values.aliases} onChange={(event) => setField('aliases', event.target.value)} />
                 </LabeledField>
@@ -1453,7 +1455,7 @@ function parseProviderForm(values: ProviderFormValues) {
 
 function parseModelForm(values: ModelFormValues) {
   if (!values.modelId.trim() || !values.upstreamModel.trim()) {
-    throw new Error('Model ID and upstream model are required')
+    throw new Error('Model ID and Upstream Model ID are required')
   }
   const input = parseModalities(values.inputCapabilities, 'input capabilities')
   const output = parseModalities(values.outputCapabilities, 'output capabilities')

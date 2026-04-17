@@ -207,6 +207,7 @@ function parseGenerationParams(draft: GenerationParamsDraft): { payload: Generat
 
 export function AgentPlayground() {
   const MAX_INPUT_LINES = 10
+  const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 48
   // Session state
   const [sessions, setSessions] = useState<SessionListItem[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -268,6 +269,7 @@ export function AgentPlayground() {
   const [availableTools, setAvailableTools] = useState<McpTool[]>([])
   const [currentIteration, setCurrentIteration] = useState(0)
   const [isExecutingTools, setIsExecutingTools] = useState(false)
+  const [isPinnedToBottom, setIsPinnedToBottom] = useState(true)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -281,6 +283,8 @@ export function AgentPlayground() {
   const callAudioRef = useRef<HTMLAudioElement | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const pendingAutoTitleRef = useRef<{ sessionId: string; seedText: string } | null>(null)
+  const isPinnedToBottomRef = useRef(true)
+  const forceScrollToBottomRef = useRef(false)
 
   const resizeInput = useCallback(() => {
     const textarea = inputRef.current
@@ -366,15 +370,47 @@ export function AgentPlayground() {
     images: message.images?.map((value) => resolveMediaUrl(value)),
   })
 
-  // Auto-scroll to bottom - use instant scroll during streaming to prevent jitter
+  const updatePinnedToBottom = useCallback((nextValue: boolean) => {
+    isPinnedToBottomRef.current = nextValue
+    setIsPinnedToBottom((prev) => (prev === nextValue ? prev : nextValue))
+  }, [])
+
+  const enableFollowOutput = useCallback(() => {
+    forceScrollToBottomRef.current = true
+    updatePinnedToBottom(true)
+  }, [updatePinnedToBottom])
+
+  const isNearBottom = useCallback((container: HTMLDivElement) => {
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    return distanceFromBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD_PX
+  }, [AUTO_SCROLL_BOTTOM_THRESHOLD_PX])
+
+  const syncPinnedToBottom = useCallback(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+    updatePinnedToBottom(isNearBottom(container))
+  }, [isNearBottom, updatePinnedToBottom])
+
+  const handleMessagesScroll = useCallback(() => {
+    syncPinnedToBottom()
+  }, [syncPinnedToBottom])
+
+  // Auto-scroll to bottom only when the user is following the latest output.
   useEffect(() => {
     const container = messagesContainerRef.current
     if (!container) return
-    
-    // Use instant scroll during streaming, smooth otherwise
-    const behavior = isStreamingRef.current ? 'auto' : 'smooth'
+
+    const shouldScroll = forceScrollToBottomRef.current || isPinnedToBottom
+    if (!shouldScroll) return
+
+    const behavior = isStreamingRef.current || forceScrollToBottomRef.current ? 'auto' : 'smooth'
     messagesEndRef.current?.scrollIntoView({ behavior })
-  }, [messages])
+
+    forceScrollToBottomRef.current = false
+    requestAnimationFrame(() => {
+      syncPinnedToBottom()
+    })
+  }, [isPinnedToBottom, messages, syncPinnedToBottom])
 
   // Load session messages when switching
   const loadSession = useCallback(async (sessionId: string) => {
@@ -384,6 +420,7 @@ export function AgentPlayground() {
       setActiveSessionStorageVersion(session.storageVersion ?? 1)
       setSessionName(session.name)
       if (session.model) setSelectedModel(session.model)
+      enableFollowOutput()
       setMessages(session.messages.map(m => {
         const normalized = normalizeSessionMessageMedia(m)
         return ({
@@ -396,10 +433,10 @@ export function AgentPlayground() {
     } catch (error) {
       console.error('Failed to load session:', error)
     }
-  }, [])
+  }, [enableFollowOutput])
 
   // Create new session
-  const handleNewSession = async () => {
+  const handleNewSession = useCallback(async () => {
     try {
       const session = await createSession(undefined, selectedModel)
       setSessions(prev => [{ 
@@ -414,11 +451,12 @@ export function AgentPlayground() {
       setActiveSessionStorageVersion(session.storageVersion ?? 2)
       setSessionName(session.name)
       pendingAutoTitleRef.current = null
+      enableFollowOutput()
       setMessages([])
     } catch (error) {
       console.error('Failed to create session:', error)
     }
-  }
+  }, [enableFollowOutput, selectedModel])
 
   // Delete session
   const handleDeleteSession = async (sessionId: string) => {
@@ -431,6 +469,7 @@ export function AgentPlayground() {
       if (activeSessionId === sessionId) {
         setActiveSessionId(null)
         setActiveSessionStorageVersion(2)
+        enableFollowOutput()
         setMessages([])
         setSessionName('')
         pendingAutoTitleRef.current = null
@@ -949,6 +988,7 @@ export function AgentPlayground() {
 
     stopAgentRef.current = false
     setCallError(null)
+    enableFollowOutput()
 
     const requestImageUrls = pendingImages.length > 0 ? [...pendingImages] : []
     let displayImageRefs = requestImageUrls.length > 0 ? [...requestImageUrls] : undefined
@@ -1446,6 +1486,7 @@ export function AgentPlayground() {
             'flex-1 min-h-0 overflow-y-auto p-6 space-y-4 relative',
             isDragging && 'bg-primary/5 border-2 border-dashed border-primary/30'
           )}
+              onScroll={handleMessagesScroll}
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
               onDragLeave={() => setIsDragging(false)}
               onDrop={handleDrop}

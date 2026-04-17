@@ -336,6 +336,12 @@ function toCapabilities(
         input.add("text");
         output.add("image");
         break;
+      case "image-to-image":
+      case "text-image-to-image":
+        input.add("text");
+        input.add("image");
+        output.add("image");
+        break;
       case "audio-to-text":
         input.add("audio");
         output.add("text");

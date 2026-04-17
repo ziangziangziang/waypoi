@@ -327,7 +327,7 @@ async function normalizeMessageMediaRefs(
 }
 
 /**
- * Normalize an image reference to a stable /admin/media/{hash} URL.
+ * Normalize an image reference to a stable /data/media/{hash} URL.
  * If conversion fails, the ORIGINAL reference is returned so images are never
  * silently dropped from sessions. A partial failure is far better than data loss.
  */
@@ -337,17 +337,17 @@ async function normalizeImageRefToLocalUrl(paths: StoragePaths, value: string): 
 
   const localHash = extractLocalMediaHash(trimmed);
   if (localHash) {
-    return `/admin/media/${localHash}`;
+    return `/data/media/${localHash}`;
   }
 
   if (/^[a-f0-9]{16}$/i.test(trimmed)) {
-    return `/admin/media/${trimmed.toLowerCase()}`;
+    return `/data/media/${trimmed.toLowerCase()}`;
   }
 
   if (trimmed.startsWith("data:image/") || trimmed.startsWith("data:audio/")) {
     try {
       const cached = await storeMedia(paths, trimmed);
-      return `/admin/media/${cached.hash}`;
+      return `/data/media/${cached.hash}`;
     } catch (err) {
       console.error(`[waypoi] Failed to cache media ref (preserving original): ${(err as Error).message}`);
       return value; // preserve — don't discard
@@ -364,7 +364,7 @@ async function normalizeImageRefToLocalUrl(paths: StoragePaths, value: string): 
       const contentType = response.headers.get("content-type") ?? undefined;
       const buffer = Buffer.from(await response.arrayBuffer());
       const cached = await storeMedia(paths, buffer, { mimeType: contentType });
-      return `/admin/media/${cached.hash}`;
+      return `/data/media/${cached.hash}`;
     } catch (err) {
       console.error(`[waypoi] Failed to fetch/cache remote image (preserving URL): ${(err as Error).message}`);
       return value; // preserve — might be temporarily unreachable
@@ -377,14 +377,14 @@ async function normalizeImageRefToLocalUrl(paths: StoragePaths, value: string): 
 
 function extractLocalMediaHash(value: string): string | null {
   if (value.startsWith("/")) {
-    const match = value.match(/^\/admin\/(?:media|images)\/([a-f0-9]{16})$/i);
+    const match = value.match(/^\/(?:admin|data)\/(?:media|images)\/([a-f0-9]{16})$/i);
     return match ? match[1].toLowerCase() : null;
   }
   try {
     const parsed = new URL(value);
     if (!["http:", "https:"].includes(parsed.protocol)) return null;
     if (!["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)) return null;
-    const match = parsed.pathname.match(/^\/admin\/(?:media|images)\/([a-f0-9]{16})$/i);
+    const match = parsed.pathname.match(/^\/(?:admin|data)\/(?:media|images)\/([a-f0-9]{16})$/i);
     return match ? match[1].toLowerCase() : null;
   } catch {
     return null;

@@ -180,6 +180,10 @@ waypoi add \
 | `POST /v1/responses` | Responses API shim |
 | `POST /mcp` | Built-in MCP service endpoint |
 
+Native websocket passthrough:
+
+- `GET /api-ws/v1/realtime?model=...` upgrades to a local WebSocket proxy for DashScope realtime ASR.
+
 `GET /v1/models` includes both legacy `endpoint_type` and detailed `capabilities` metadata when available.
 
 ### Responses API Shim
@@ -215,6 +219,19 @@ For `stream: true`, Waypoi emits Responses-style SSE events (`response.created`,
 | `GET /admin/providers/:id` | Provider details |
 | `GET /admin/pools` | Smart pool definitions |
 | `POST /admin/pools/rebuild` | Rebuild smart pools from providers |
+
+## DashScope Native Support
+
+Waypoi standardizes Alibaba Model Studio through the `dashscope` provider protocol:
+
+- Qwen image generation and image editing use DashScope multimodal image APIs behind the existing OpenAI-compatible `/v1/images/*` routes.
+- Wan video generation uses the current DashScope async video API behind `POST /v1/videos/generations`.
+- File transcription stays on `POST /v1/audio/transcriptions`.
+- Realtime ASR is exposed as a native local websocket passthrough at `ws://localhost:9469/api-ws/v1/realtime?model=<model>`.
+
+Example provider config:
+
+- [examples/providers/alibaba-dashscope.yaml](/Users/zziang/Documents/Projects/waypoi/examples/providers/alibaba-dashscope.yaml)
 
 ## Built-In MCP Service (`/mcp`)
 

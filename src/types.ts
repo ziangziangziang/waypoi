@@ -300,6 +300,10 @@ export interface VideoGenerationRequest {
   negative_prompt?: string;
   image_url?: string;
   audio_url?: string;
+  media?: Array<{
+    type: string;
+    url: string;
+  }>;
   duration?: number;
   resolution?: string;
   n?: number;

@@ -64,6 +64,7 @@ export interface ProtocolNormalizeResponseContext {
   path: string;
   publicModel: string;
   upstreamModel: string;
+  endpoint: EndpointDoc;
   requestPayload: Record<string, unknown>;
   upstreamResult: UpstreamResult;
   config?: ProtocolAdapterConfig;

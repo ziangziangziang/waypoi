@@ -58,12 +58,6 @@ export async function selectPoolCandidates(
       }
     }
 
-    const requiresApiKey = (candidate.auth?.type ?? "bearer") !== "none";
-    if (requiresApiKey && !candidate.apiKey) {
-      skipped.push({ candidateId: candidate.id, reason: "missing_api_key" });
-      continue;
-    }
-
     if (!candidate.providerEnabled) {
       skipped.push({ candidateId: candidate.id, reason: "provider_disabled" });
       continue;
@@ -74,7 +68,7 @@ export async function selectPoolCandidates(
     }
     if (candidate.providerModelId) {
       const health = healthMap[candidate.providerModelId];
-      if (health?.status === "down") {
+      if (health?.status === "down" && shouldRespectHealthStatus(candidate.protocol)) {
         skipped.push({ candidateId: candidate.id, reason: "health_down" });
         continue;
       }
@@ -130,6 +124,10 @@ export async function selectPoolCandidates(
     candidates,
     skipped,
   };
+}
+
+function shouldRespectHealthStatus(protocol: string): boolean {
+  return protocol !== "dashscope";
 }
 
 export async function markPoolAttempt(

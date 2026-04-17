@@ -205,7 +205,7 @@ async function resolveLocalMediaUrl(
 ): Promise<{ data: string; format?: string }> {
   const hash = extractLocalHash(url);
   if (!hash) {
-    throw invalidRequestError("Only local /admin/media or /admin/images URLs are allowed for input_audio.");
+    throw invalidRequestError("Only local /admin/media, /admin/images, /data/media, or /data/images URLs are allowed for input_audio.");
   }
 
   const mediaPath = await getMediaPath(paths, hash);
@@ -227,7 +227,7 @@ function extractLocalHash(url: string): string | null {
   if (!normalized) {
     return null;
   }
-  const mediaMatch = normalized.match(/^\/admin\/(media|images)\/([a-f0-9]{16})$/i);
+  const mediaMatch = normalized.match(/^\/(?:admin|data)\/(media|images)\/([a-f0-9]{16})$/i);
   if (!mediaMatch) {
     return null;
   }

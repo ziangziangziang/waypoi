@@ -51,6 +51,12 @@ Key fields:
 
 - `inference_v2` v1 supports chat/vision sync (`stream=false`) only.
 - Streaming requests are rejected for this protocol unless another pool candidate supports streaming.
+- `dashscope` uses Alibaba native APIs for:
+  - `POST /v1/images/generations` and `POST /v1/images/edits` via DashScope multimodal image generation/editing
+  - `POST /v1/videos/generations` via DashScope async video generation
+  - `GET/WS /api-ws/v1/realtime?model=...` as a local passthrough for DashScope realtime ASR
+- DashScope image-capable models should declare both `text-to-image` and `image-to-image` when they support editing/reference-image generation. This is what makes them eligible for `/v1/images/edits`.
+- DashScope file transcription remains on the existing OpenAI-compatible HTTP route: `POST /v1/audio/transcriptions`.
 - Unknown protocols are imported but marked non-routable.
 - Pool alias surface is now a single `smart` alias; legacy `smart-*` aliases are rejected.
 - TLS inheritance:
@@ -59,6 +65,17 @@ Key fields:
 - Allowlisted auto-insecure fallback:
   - On TLS verify failures, Waypoi retries insecure TLS only when hostname matches provider `autoInsecureTlsDomains`.
   - If retry succeeds, Waypoi persists `model.insecureTls=true` for that model.
+
+## DashScope example
+
+See: [examples/providers/alibaba-dashscope.yaml](/Users/zziang/Documents/Projects/waypoi/examples/providers/alibaba-dashscope.yaml)
+
+This example includes:
+
+- `qwen-image-2.0-pro` and `qwen-image-2.0` for native image generation and editing
+- `wan2.7-i2v` / `wan2.7-t2v` for native video generation
+- `qwen3-asr-flash` for file transcription
+- `qwen3-asr-flash-realtime` for websocket realtime ASR proxied through Waypoi
 
 ## PCAI endpoint migration runbook (`*.ai-application.stjude.org`)
 

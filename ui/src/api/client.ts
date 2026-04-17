@@ -588,12 +588,37 @@ export interface ImageGenerationResponse {
 export async function generateImage(
   request: ImageGenerationRequest
 ): Promise<ImageGenerationResponse> {
+  const normalizedRequest = normalizeImageGenerationRequest(request);
   const response = await fetch(`${API_BASE}/v1/images/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
+    body: JSON.stringify(normalizedRequest),
   });
   return handleResponse<ImageGenerationResponse>(response);
+}
+
+function normalizeImageGenerationRequest(
+  request: ImageGenerationRequest
+): ImageGenerationRequest {
+  if (!request.model || !request.size) {
+    return request;
+  }
+  if (!shouldUseDashScopeSizeFormat(request.model)) {
+    return request;
+  }
+  return {
+    ...request,
+    size: request.size.replace(/^(\d+)x(\d+)$/i, '$1*$2'),
+  };
+}
+
+function shouldUseDashScopeSizeFormat(model: string): boolean {
+  const normalized = model.toLowerCase();
+  return (
+    normalized.startsWith('ali/') ||
+    normalized.includes('/qwen-image') ||
+    normalized.includes('/wan')
+  );
 }
 
 // ========================================
@@ -766,7 +791,7 @@ export async function getMediaCacheStats(): Promise<MediaCacheStats> {
 }
 
 export function getCachedImageUrl(hash: string): string {
-  return `${API_BASE}/admin/images/${hash}`;
+  return `${API_BASE}/data/images/${hash}`;
 }
 
 export function resolveMediaUrl(hashOrUrl: string): string {
@@ -780,13 +805,16 @@ export function resolveMediaUrl(hashOrUrl: string): string {
   if (value.startsWith('admin/')) {
     return `${API_BASE}/${value}`;
   }
+  if (value.startsWith('data/')) {
+    return `${API_BASE}/${value}`;
+  }
   if (value.startsWith('media/')) {
-    return `${API_BASE}/admin/${value}`;
+    return `${API_BASE}/data/${value}`;
   }
   if (value.startsWith('images/')) {
-    return `${API_BASE}/admin/${value}`;
+    return `${API_BASE}/data/${value}`;
   }
-  return `${API_BASE}/admin/media/${value}`;
+  return `${API_BASE}/data/media/${value}`;
 }
 
 export function normalizeSessionMessageMedia(message: ChatSessionMessage): ChatSessionMessage {

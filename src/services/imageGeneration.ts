@@ -1,7 +1,7 @@
 import { routeRequest } from "../routing/router";
 import { selectPoolCandidates } from "../pools/scheduler";
-import { pickBestProviderModelByCapabilities } from "../providers/modelRegistry";
-import { getMediaEntry, getMediaPath } from "../storage/imageCache";
+import { pickBestProviderModelByCapabilities, resolveModel } from "../providers/modelRegistry";
+import { getMediaEntry, getMediaPath, storeMedia } from "../storage/imageCache";
 import { StoragePaths } from "../storage/files";
 import { ImageGenerationRequest } from "../types";
 import { promises as fs } from "fs";
@@ -63,10 +63,15 @@ export async function runImageGeneration(
     error.retryable = false;
     throw error;
   }
+  const normalizedRequest = normalizeImageGenerationRequestForModel(request, model);
 
   let body: { payload: unknown };
   let outcome: Awaited<ReturnType<typeof routeRequest>>;
-  if (request.image_url) {
+  const useNativeImageRoute = normalizedRequest.image_url
+    ? await shouldUseNativeImageRouteForModel(paths, model)
+    : true;
+
+  if (normalizedRequest.image_url && !useNativeImageRoute) {
     const chatPayload = {
       model,
       stream: false,
@@ -74,8 +79,8 @@ export async function runImageGeneration(
         {
           role: "user",
           content: [
-            { type: "text", text: request.prompt },
-            { type: "image_url", image_url: { url: request.image_url } },
+            { type: "text", text: normalizedRequest.prompt },
+            { type: "image_url", image_url: { url: normalizedRequest.image_url } },
           ],
         },
       ],
@@ -118,17 +123,22 @@ export async function runImageGeneration(
       paths,
       model,
       "/v1/images/generations",
-      { ...request, model } as Record<string, unknown>,
+      { ...normalizedRequest, model } as Record<string, unknown>,
       headers,
       signal,
       {
         endpointType: "diffusion",
-        requiredInput: ["text"],
+        requiredInput: normalizedRequest.image_url ? ["text", "image"] : ["text"],
         requiredOutput: ["image"],
       }
     );
     body = await readBody(outcome.attempt.response);
   }
+  body.payload = await materializeRemoteImageOutputs(
+    paths,
+    body.payload,
+    normalizedRequest.response_format ?? "url"
+  );
 
   return {
     model,
@@ -141,6 +151,69 @@ export async function runImageGeneration(
       upstreamModel: outcome.attempt.upstreamModel,
     },
   };
+}
+
+export async function shouldUseNativeImageRouteForModel(
+  paths: StoragePaths,
+  model: string
+): Promise<boolean> {
+  const resolved = await resolveModel(
+    paths,
+    model,
+    {
+      requiredInput: ["text", "image"],
+      requiredOutput: ["image"],
+    },
+    {
+      operation: "images_generation",
+      stream: false,
+    }
+  );
+
+  if (resolved.kind === "pool") {
+    const selection = await selectPoolCandidates(
+      paths,
+      resolved.alias,
+      {
+        requiredInput: ["text", "image"],
+        requiredOutput: ["image"],
+      },
+      {
+        operation: "images_generation",
+        stream: false,
+      }
+    );
+    return Boolean(selection?.candidates.some((candidate) => candidate.protocol === "dashscope"));
+  }
+
+  if (resolved.kind !== "direct") {
+    return false;
+  }
+
+  return resolved.candidates.some((candidate) => candidate.protocol === "dashscope");
+}
+
+export function normalizeImageGenerationRequestForModel(
+  request: ImageGenerationRequest,
+  model: string
+): ImageGenerationRequest {
+  if (!request.size || !usesDashScopeImageSizeFormat(model)) {
+    return request;
+  }
+  return {
+    ...request,
+    size: request.size.replace(/^(\d+)x(\d+)$/i, "$1*$2"),
+  };
+}
+
+function usesDashScopeImageSizeFormat(model: string): boolean {
+  const normalized = model.toLowerCase();
+  return (
+    normalized.startsWith("ali/") ||
+    normalized.startsWith("alibaba-dashscope/") ||
+    normalized.includes("/qwen-image") ||
+    normalized.includes("/wan")
+  );
 }
 
 export async function normalizeImageGenerationPayload(
@@ -189,6 +262,77 @@ export async function normalizeImageGenerationPayload(
   }
 
   return { model, created, images };
+}
+
+export async function materializeRemoteImageOutputs(
+  paths: StoragePaths,
+  payload: unknown,
+  responseFormat: "url" | "b64_json"
+): Promise<unknown> {
+  const root = payload as { data?: unknown } | null;
+  const data = Array.isArray(root?.data) ? root.data : [];
+  if (data.length === 0) {
+    return payload;
+  }
+
+  const nextData: Array<Record<string, unknown>> = [];
+  for (const item of data) {
+    const typed = (item ?? {}) as {
+      url?: unknown;
+      b64_json?: unknown;
+      revised_prompt?: unknown;
+    };
+    const nextItem: Record<string, unknown> = {};
+    if (typeof typed.revised_prompt === "string" && typed.revised_prompt.length > 0) {
+      nextItem.revised_prompt = typed.revised_prompt;
+    }
+
+    const b64 = typeof typed.b64_json === "string" && typed.b64_json.length > 0 ? typed.b64_json : undefined;
+    const url = typeof typed.url === "string" && typed.url.length > 0 ? typed.url : undefined;
+
+    if (b64) {
+      nextItem.b64_json = b64;
+      nextItem.url = normalizeLocalImageUrl(url) ?? `data:image/png;base64,${b64}`;
+      nextData.push(nextItem);
+      continue;
+    }
+
+    if (!url) {
+      nextData.push(nextItem);
+      continue;
+    }
+
+    const normalizedLocalUrl = normalizeLocalImageUrl(url);
+    if (normalizedLocalUrl) {
+      nextItem.url = normalizedLocalUrl;
+      if (responseFormat === "b64_json") {
+        const extracted = await tryExtractBase64FromUrl(paths, normalizedLocalUrl);
+        if (extracted) {
+          nextItem.b64_json = extracted.b64;
+        }
+      }
+      nextData.push(nextItem);
+      continue;
+    }
+
+    const materialized = await downloadAndCacheRemoteImage(paths, url);
+    if (!materialized) {
+      nextItem.url = url;
+      nextData.push(nextItem);
+      continue;
+    }
+
+    nextItem.url = materialized.localUrl;
+    if (responseFormat === "b64_json") {
+      nextItem.b64_json = materialized.b64;
+    }
+    nextData.push(nextItem);
+  }
+
+  return {
+    ...(typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {}),
+    data: nextData,
+  };
 }
 
 export function normalizeChatImagePayload(payload: unknown): unknown {
@@ -353,12 +497,43 @@ async function tryExtractBase64FromUrl(
   return { mimeType, b64: buffer.toString("base64") };
 }
 
+async function downloadAndCacheRemoteImage(
+  paths: StoragePaths,
+  url: string
+): Promise<{ localUrl: string; b64: string; mimeType: string } | null> {
+  if (!/^https?:\/\//i.test(url)) {
+    return null;
+  }
+
+  const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch generated image: ${response.status}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const hintedMimeType = normalizeMimeTypeHeader(response.headers.get("content-type"));
+  const detectedMimeType = detectImageMimeFromBuffer(buffer);
+  const mimeType = hintedMimeType?.startsWith("image/")
+    ? hintedMimeType
+    : detectedMimeType;
+  if (!mimeType) {
+    return null;
+  }
+
+  const stored = await storeMedia(paths, buffer, { mimeType });
+  return {
+    localUrl: `/data/images/${stored.hash}`,
+    b64: buffer.toString("base64"),
+    mimeType: stored.mimeType,
+  };
+}
+
 function extractLocalHash(url: string): string | null {
   const normalized = normalizeLocalUrl(url);
   if (!normalized) {
     return null;
   }
-  const mediaMatch = normalized.match(/^\/admin\/(media|images)\/([a-f0-9]{16})$/i);
+  const mediaMatch = normalized.match(/^\/(?:admin|data)\/(media|images)\/([a-f0-9]{16})$/i);
   if (!mediaMatch) {
     return null;
   }
@@ -383,6 +558,20 @@ function normalizeLocalUrl(url: string): string | null {
   }
 }
 
+function normalizeLocalImageUrl(url: string | undefined): string | null {
+  if (!url) {
+    return null;
+  }
+  if (url.startsWith("data:")) {
+    return url;
+  }
+  const hash = extractLocalHash(url);
+  if (!hash) {
+    return null;
+  }
+  return `/data/images/${hash}`;
+}
+
 function mimeFromExt(filePath: string): string {
   const ext = path.extname(filePath).slice(1).toLowerCase();
   const map: Record<string, string> = {
@@ -393,4 +582,34 @@ function mimeFromExt(filePath: string): string {
     webp: "image/webp",
   };
   return map[ext] ?? "application/octet-stream";
+}
+
+function normalizeMimeTypeHeader(contentType: string | null): string | undefined {
+  if (!contentType) {
+    return undefined;
+  }
+  return contentType.split(";")[0]?.trim().toLowerCase() || undefined;
+}
+
+function detectImageMimeFromBuffer(buffer: Buffer): string | undefined {
+  if (buffer.length >= 4 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return "image/png";
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (buffer.length >= 3 && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+    return "image/gif";
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer[0] === 0x52 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x46 &&
+    buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  return undefined;
 }

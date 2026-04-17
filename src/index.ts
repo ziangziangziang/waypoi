@@ -12,6 +12,7 @@ import { registerSessionRoutes } from "./routes/sessions";
 import { registerMcpRoutes } from "./routes/mcp";
 import { closeMcpServiceRoutes, registerMcpServiceRoutes } from "./routes/mcpService";
 import { registerUiRoutes } from "./routes/ui";
+import { registerRealtimeRoutes } from "./routes/realtime";
 import { registerRequestStatsMiddleware } from "./middleware/requestStats";
 import { registerRequestCaptureMiddleware } from "./middleware/requestCapture";
 import { registerAuthHooks, loadAuthConfig, updateAuthConfig } from "./middleware/auth";
@@ -60,6 +61,7 @@ async function start(): Promise<void> {
   await registerVideoRoutes(app, paths);
   await registerAudioRoutes(app, paths);
   await registerResponsesRoutes(app, paths);
+  await registerRealtimeRoutes(app, paths);
   
   // Admin routes
   const version = await resolveAppVersion();
