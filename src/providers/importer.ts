@@ -40,6 +40,7 @@ interface ProviderConfigFile {
     keyPrefix?: string;
   };
   env?: string;
+  accountIdEnv?: string;
   autoInsecureTlsDomains?: string[];
   responseTextPaths?: string[];
   limits?: ProviderLimits;
@@ -99,7 +100,12 @@ export async function importProviders(
     const protocolRaw = (config.endpoint?.protocol ?? entry.protocol ?? "unknown").toLowerCase();
     const normalizedProtocol = canonicalizeProtocol(protocolRaw);
     const protocol: ProviderProtocol =
-      normalizedProtocol === "openai" || normalizedProtocol === "inference_v2" || normalizedProtocol === "dashscope"
+      normalizedProtocol === "openai" ||
+      normalizedProtocol === "inference_v2" ||
+      normalizedProtocol === "dashscope" ||
+      normalizedProtocol === "cloudflare" ||
+      normalizedProtocol === "ollama" ||
+      normalizedProtocol === "gemini"
         ? normalizedProtocol
         : "unknown";
     const auth = parseAuthConfig(config.auth);
@@ -115,7 +121,7 @@ export async function importProviders(
       previous?.apiKey,
       options.overwriteAuth ?? false
     );
-    const baseUrl = config.endpoint?.baseUrl;
+    const baseUrl = resolveBaseUrl(config, envMap);
 
     if (!baseUrl) {
       warnings.push(`Provider '${providerId}' has no endpoint.baseUrl; skipped.`);
@@ -134,6 +140,7 @@ export async function importProviders(
     }
 
     const models = (config.models ?? [])
+      .filter((model) => isImportableModel(providerId, model))
       .map((model) => {
         if (!model.id) {
           warnings.push(`Provider '${providerId}' has model without id; skipped.`);
@@ -261,6 +268,39 @@ function resolveApiKey(
     return previous;
   }
   return value ?? previous;
+}
+
+function resolveBaseUrl(
+  config: ProviderConfigFile,
+  envMap: EnvMap
+): string | undefined {
+  const raw = typeof config.endpoint?.baseUrl === "string" ? config.endpoint.baseUrl.trim() : "";
+  if (!raw) {
+    return undefined;
+  }
+  if (!raw.includes("{ACCOUNT_ID}")) {
+    return raw;
+  }
+  const envKey = typeof config.accountIdEnv === "string" ? config.accountIdEnv.trim() : "";
+  const accountId = envKey ? envMap[envKey] ?? process.env[envKey] : undefined;
+  return accountId ? raw.replaceAll("{ACCOUNT_ID}", accountId) : raw;
+}
+
+function isImportableModel(
+  providerId: string,
+  model: NonNullable<ProviderConfigFile["models"]>[number]
+): boolean {
+  const modalities = Array.isArray(model.modalities) ? model.modalities : [];
+  if (providerId === "cloudflare") {
+    return (
+      modalities.includes("text-to-text") &&
+      (model.capabilities?.streaming === true || typeof model.benchmark?.livebench === "number")
+    );
+  }
+  if (providerId === "ollama-cloud") {
+    return modalities.includes("text-to-text");
+  }
+  return true;
 }
 
 async function loadEnvMap(envFilePath?: string): Promise<EnvMap> {

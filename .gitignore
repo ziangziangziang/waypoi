@@ -6,3 +6,4 @@ ui/dist
 /test-results
 .vscode/
 .github/agents
+references/

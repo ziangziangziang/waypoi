@@ -1,6 +1,6 @@
 {
   "name": "waypoi",
-  "version": "0.7.1-beta.2",
+  "version": "0.7.1-beta.3",
   "description": "Local OpenAI-compatible AI gateway with intelligent routing, failover, MCP tools, and a built-in playground UI",
   "license": "MIT",
   "main": "dist/src/index.js",

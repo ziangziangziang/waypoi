@@ -103,11 +103,16 @@ export async function routeRequest(
       const streamUnsupported = poolSelection?.skipped.some(
         (item) => item.reason === "stream_unsupported"
       );
+      const operationUnsupported = poolSelection?.skipped.some(
+        (item) => item.reason === "unsupported_operation"
+      );
       const error = new Error("No eligible endpoints for model") as UpstreamError;
       error.type = exhaustedByLimits
         ? "rate_limited"
         : streamUnsupported
           ? "protocol_stream_unsupported"
+          : operationUnsupported
+            ? "unsupported_operation"
           : "no_endpoints";
       error.retryable = Boolean(exhaustedByLimits);
       throw error;
@@ -129,7 +134,12 @@ export async function routeRequest(
 
   if (resolved.candidates.length === 0) {
     const error = new Error("No eligible endpoints for model") as UpstreamError;
-    error.type = "no_endpoints";
+    error.type =
+      resolved.unsupportedReason === "stream_unsupported"
+        ? "protocol_stream_unsupported"
+        : resolved.unsupportedReason === "unsupported_operation"
+          ? "unsupported_operation"
+          : "no_endpoints";
     error.retryable = false;
     throw error;
   }

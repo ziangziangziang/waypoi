@@ -60,6 +60,59 @@ export async function listProtocols(): Promise<ProtocolInfo[]> {
   return result.data;
 }
 
+export interface ProviderCatalogPreset {
+  id: string;
+  name: string;
+  description?: string;
+  docs?: string;
+  protocol: ProviderProtocol;
+  protocolRaw?: string;
+  protocolConfig?: ProviderProtocolConfig;
+  baseUrl: string;
+  insecureTls?: boolean;
+  autoInsecureTlsDomains?: string[];
+  supportsRouting: boolean;
+  auth?: ProviderAuthConfig;
+  envVar?: string;
+  limits?: ProviderLimits;
+}
+
+export interface ProviderCatalogModelSummary {
+  total: number;
+  free: number;
+  benchmarked: number;
+}
+
+export interface ProviderCatalogEntry {
+  id: string;
+  source: 'free';
+  name: string;
+  description?: string;
+  docs?: string;
+  free: boolean;
+  readiness: 'ready' | 'unsupported';
+  protocol: ProviderProtocol;
+  protocolRaw?: string;
+  modelSummary: ProviderCatalogModelSummary;
+  limits?: {
+    requestsPerMinute?: number;
+    requestsPerDay?: number;
+    tokensPerMinute?: number;
+    tokensPerDay?: number;
+  };
+  preset: ProviderCatalogPreset;
+}
+
+export interface ProviderCatalogResponse {
+  data: ProviderCatalogEntry[];
+}
+
+export async function listProviderCatalog(source: 'free' = 'free'): Promise<ProviderCatalogEntry[]> {
+  const response = await fetch(`${API_BASE}/admin/provider-catalog?source=${encodeURIComponent(source)}`);
+  const result = await handleResponse<ProviderCatalogResponse>(response);
+  return result.data;
+}
+
 // ========================================
 // Providers API
 // ========================================
@@ -87,12 +140,18 @@ export interface ProviderModel {
 export interface DiscoveredProviderModel {
   id: string;
   capabilities?: ModelCapabilities;
+  free?: boolean;
+  benchmark?: {
+    livebench?: number;
+  };
 }
 
 export interface ProviderModelDiscoveryResponse {
   baseUrl: string;
   models: DiscoveredProviderModel[];
 }
+
+export type ProviderProtocol = 'openai' | 'inference_v2' | 'dashscope' | 'cloudflare' | 'ollama' | 'gemini' | 'unknown';
 
 export interface ProviderAuthConfig {
   type: 'bearer' | 'query' | 'header' | 'none';

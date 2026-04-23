@@ -1,6 +1,9 @@
 import { inferenceV2ProtocolAdapter } from "./adapters/inferenceV2";
 import { openAiProtocolAdapter } from "./adapters/openai";
 import { dashscopeProtocolAdapter } from "./adapters/dashscope";
+import { cloudflareProtocolAdapter } from "./adapters/cloudflare";
+import { ollamaProtocolAdapter } from "./adapters/ollama";
+import { geminiProtocolAdapter } from "./adapters/gemini";
 import { ProtocolAdapter, ProtocolOperation } from "./types";
 
 const PROTOCOL_ALIASES: Record<string, string> = {
@@ -13,12 +16,18 @@ const PROTOCOL_ALIASES: Record<string, string> = {
   v2_infer: "inference_v2",
   "v2-infer": "inference_v2",
   dashscope: "dashscope",
+  cloudflare: "cloudflare",
+  ollama: "ollama",
+  gemini: "gemini",
 };
 
 const ADAPTERS = new Map<string, ProtocolAdapter>([
   [openAiProtocolAdapter.id, openAiProtocolAdapter],
   [inferenceV2ProtocolAdapter.id, inferenceV2ProtocolAdapter],
   [dashscopeProtocolAdapter.id, dashscopeProtocolAdapter],
+  [cloudflareProtocolAdapter.id, cloudflareProtocolAdapter],
+  [ollamaProtocolAdapter.id, ollamaProtocolAdapter],
+  [geminiProtocolAdapter.id, geminiProtocolAdapter],
 ]);
 
 const PROTOCOL_METADATA: Record<string, { label: string; description: string }> = {
@@ -33,6 +42,18 @@ const PROTOCOL_METADATA: Record<string, { label: string; description: string }> 
   dashscope: {
     label: "DashScope (Alibaba ModelStudio)",
     description: "Alibaba Cloud ModelStudio native API. Supports image generation, video generation, and async task-based operations.",
+  },
+  cloudflare: {
+    label: "Cloudflare Workers AI",
+    description: "Cloudflare Workers AI native protocol. Supports chat completions and native model discovery.",
+  },
+  ollama: {
+    label: "Ollama Cloud",
+    description: "Ollama native cloud protocol. Supports chat completions, streaming, and native model discovery.",
+  },
+  gemini: {
+    label: "Google AI Studio (Gemini)",
+    description: "Gemini native protocol. Supports chat completions, vision input, streaming, and native model discovery.",
   },
 };
 

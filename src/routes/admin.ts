@@ -2,6 +2,11 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { StoragePaths } from "../storage/files";
 import { listAllProtocolAdapters } from "../protocols/registry";
 import {
+  getProviderCatalogEntry,
+  listProviderCatalog,
+  matchCatalogModel,
+} from "../providers/catalog";
+import {
   deleteProvider,
   deleteProviderModel,
   getEffectiveModelInsecureTls,
@@ -15,7 +20,7 @@ import {
   upsertProvider,
   upsertProviderModel,
 } from "../providers/repository";
-import { ProviderModelRecord, ProviderRecord } from "../providers/types";
+import { ProviderCatalogEntry, ProviderModelRecord, ProviderRecord } from "../providers/types";
 import { listPools, savePools } from "../pools/repository";
 import { PoolDefinition } from "../pools/types";
 import { rebuildDefaultPools } from "../pools/builder";
@@ -69,6 +74,21 @@ interface ProviderModelDiscoveryPayload {
   insecureTls?: boolean;
 }
 
+interface DiscoveredModelResponse {
+  id: string;
+  capabilities?: {
+    input: string[];
+    output: string[];
+    supportsTools?: boolean;
+    supportsStreaming?: boolean;
+    source?: string;
+  };
+  free?: boolean;
+  benchmark?: {
+    livebench?: number;
+  };
+}
+
 interface ProviderPayload {
   id?: string;
   name?: string;
@@ -114,6 +134,12 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
   app.get("/admin/providers", async (_req, reply) => {
     const providers = await listProviders(paths);
     reply.send(providers);
+  });
+
+  app.get("/admin/provider-catalog", async (req, reply) => {
+    const query = req.query as { source?: string } | undefined;
+    const entries = await listProviderCatalog({ source: query?.source });
+    reply.send({ data: entries });
   });
 
   app.get("/admin/providers/:id", async (req, reply) => {
@@ -232,16 +258,33 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
     }
 
     try {
-      const models = await discoverUpstreamModels({
+      const catalogEntry = await getProviderCatalogEntry(id, { source: "free" });
+      let models: DiscoveredModelResponse[];
+      try {
+        models = await discoverUpstreamModels({
+          baseUrl,
+          apiKey: body?.apiKey?.trim() || provider.apiKey,
+          insecureTls:
+            body?.insecureTls === true
+              ? true
+              : getEffectiveModelInsecureTls(provider, { insecureTls: undefined }),
+          protocol: provider.protocol,
+          auth: provider.auth,
+        });
+      } catch (error) {
+        if (provider.protocol === "cloudflare" || provider.protocol === "ollama" || provider.protocol === "gemini") {
+          throw error;
+        }
+        const catalogModels = buildCatalogDiscoveryFallback(catalogEntry);
+        if (catalogModels.length === 0) {
+          throw error;
+        }
+        models = catalogModels;
+      }
+      reply.send({
         baseUrl,
-        apiKey: body?.apiKey?.trim() || provider.apiKey,
-        insecureTls:
-          body?.insecureTls === true
-            ? true
-            : getEffectiveModelInsecureTls(provider, { insecureTls: undefined }),
-        auth: provider.auth,
+        models: models.map((model) => enrichDiscoveredModel(model, catalogEntry)),
       });
-      reply.send({ baseUrl, models });
     } catch (error) {
       const message = error instanceof Error && error.message ? error.message : "model discovery failed";
       reply.code(502).send({ error: { message } });
@@ -639,6 +682,80 @@ function isAuthorized(req: FastifyRequest, token?: string): boolean {
   }
   const remote = req.socket.remoteAddress ?? "";
   return remote === "127.0.0.1" || remote === "::1";
+}
+
+function enrichDiscoveredModel(
+  model: DiscoveredModelResponse,
+  catalogEntry: ProviderCatalogEntry | null
+): DiscoveredModelResponse {
+  const matched = matchCatalogModel(catalogEntry, model.id);
+  if (!matched) {
+    return model;
+  }
+  return {
+    ...model,
+    free: matched.free,
+    benchmark: matched.benchmark,
+    capabilities: model.capabilities
+      ? {
+          input: mergeUniqueModalities(model.capabilities.input, matched.capabilities?.input),
+          output: mergeUniqueModalities(model.capabilities.output, matched.capabilities?.output),
+          supportsTools:
+            typeof model.capabilities.supportsTools === "boolean"
+              ? model.capabilities.supportsTools
+              : matched.supportsTools,
+          supportsStreaming:
+            typeof model.capabilities.supportsStreaming === "boolean"
+              ? model.capabilities.supportsStreaming
+              : matched.supportsStreaming,
+          source: model.capabilities.source ?? matched.capabilities?.source,
+        }
+      : matched.capabilities
+        ? {
+            ...matched.capabilities,
+            supportsTools:
+              typeof matched.capabilities.supportsTools === "boolean"
+                ? matched.capabilities.supportsTools
+                : matched.supportsTools,
+            supportsStreaming:
+              typeof matched.capabilities.supportsStreaming === "boolean"
+                ? matched.capabilities.supportsStreaming
+                : matched.supportsStreaming,
+            source: matched.capabilities.source ?? "configured",
+          }
+        : model.capabilities,
+  };
+}
+
+function buildCatalogDiscoveryFallback(
+  catalogEntry: ProviderCatalogEntry | null
+): DiscoveredModelResponse[] {
+  if (!catalogEntry) {
+    return [];
+  }
+  return catalogEntry.models
+    .filter((model) => model.capabilities)
+    .map((model) => ({
+      id: model.id,
+      free: model.free,
+      benchmark: model.benchmark,
+      capabilities: {
+        ...model.capabilities!,
+        supportsTools:
+          typeof model.capabilities?.supportsTools === "boolean"
+            ? model.capabilities.supportsTools
+            : model.supportsTools,
+        supportsStreaming:
+          typeof model.capabilities?.supportsStreaming === "boolean"
+            ? model.capabilities.supportsStreaming
+            : model.supportsStreaming,
+        source: model.capabilities?.source ?? "configured",
+      },
+    }));
+}
+
+function mergeUniqueModalities(primary: string[], secondary?: string[]): string[] {
+  return Array.from(new Set([...(primary ?? []), ...(secondary ?? [])]));
 }
 
 function formatDateForTimeZone(value: Date, timeZone: string): string {

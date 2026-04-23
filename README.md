@@ -86,7 +86,7 @@ Here is the ascii art version of the logo:
 | **Agent Mode** | Built-in MCP (Model Context Protocol) client — connect external servers or use the built-in `/mcp` endpoint; tools auto-connected and pre-selected on startup |
 | **Built-in MCP Tools** | `generate_image` (diffusion routing, file output to `~/.config/waypoi`) and `understand_image` (vision model analysis with geometry metadata) |
 | **Model Capability Matrix** | Per-model input/output modality classification (`text`, `image`, `audio`, `embedding`, `reasoning`) with configured or inferred sources |
-| **Provider Catalog** | First-class provider and model management via `waypoi providers` / `waypoi models` CLI; supports `openai`, `inference_v2`, and custom adapters |
+| **Provider Catalog** | First-class provider and model management in both Settings and CLI, including curated free-provider presets, ranked model discovery, and provider-first routing |
 | **Responses API Shim** | `/v1/responses` compatibility shim translates Responses-style requests to chat completions with SSE event mapping |
 | **Benchmark Showcase** | Live example replays and diagnostic suites via `waypoi bench`; supports file-driven scenarios, baselines, and per-model targeting |
 | **Peek** | Request-capture browser with calendar view, timeline inspection, media artifacts tab, and token-flow Sankey visualization |
@@ -146,7 +146,111 @@ npm run start
 
 Open http://localhost:9469/ui for the web interface.
 
-## Add an Endpoint
+## Add Providers and Models
+
+Waypoi is now provider-first. The recommended setup flow is:
+
+1. Add or import a provider
+2. Discover or add models under that provider
+3. Use canonical model IDs like `provider/model` or the `smart` pool alias
+
+## Free LLM Providers
+
+Waypoi includes a curated **Free LLM providers** catalog sourced from the local [`references/`](/Users/zziang/Documents/Projects/waypoi/references) registry. This catalog is used in two places:
+
+- the Settings UI `Catalog` tab when adding a provider
+- the CLI import path via `waypoi providers import -f .env`
+
+The goal is to make free-tier providers easy to try without manually copying endpoints, auth types, or starter model metadata.
+
+What the catalog includes:
+
+- provider presets for publicly documented free-tier LLM APIs
+- provider metadata such as docs links, auth shape, basic limits, and model counts
+- curated model metadata used for ranking and discovery
+
+How compatibility works:
+
+- `Ready now` means the provider can be added directly into Waypoi’s current provider framework
+- `Coming soon` means the provider is kept in the catalog, but its upstream protocol is not fully integrated into Waypoi yet
+
+Today, the best-supported free-provider flow is for providers that already fit Waypoi’s implemented protocols and discovery behavior, especially OpenAI-compatible ones. The catalog is still shown for broader free-tier coverage so users can see what is planned next.
+
+### Current Support and Roadmap
+
+| Provider | Status | Notes |
+|---|---|---|
+| Cerebras | Supported now | OpenAI-compatible provider in the current framework |
+| GitHub Models | Supported now | Discovery uses provider-specific fallback behavior |
+| Groq | Supported now | OpenAI-compatible provider in the current framework |
+| HuggingFace | Supported now | OpenAI-compatible router/gateway integration |
+| Mistral | Supported now | OpenAI-compatible provider in the current framework |
+| NVIDIA NIM | Supported now | OpenAI-compatible provider with large discovered model catalog |
+| OpenRouter | Supported now | OpenAI-compatible gateway with large free-model catalog |
+| Vercel AI Gateway | Supported now | OpenAI-compatible gateway with provider-specific discovery handling |
+| Gemini | Supported now | Native `gemini` protocol using `/models` discovery and `generateContent` / `streamGenerateContent` chat routing |
+| Cloudflare Workers AI | Supported now | Native `cloudflare` protocol using account-scoped `/ai/v1` chat routing and `/ai/models/search` discovery |
+| Ollama Cloud | Supported now | Native `ollama` protocol using `/api/chat` routing and `/api/tags` discovery |
+
+Support status here is about **Waypoi integration**, not whether the upstream service account is automatically usable. You still need a valid provider token, and each provider may enforce its own limits, allowlists, or account requirements.
+
+### With the UI
+
+Open `http://localhost:9469/ui`, then go to `Settings`.
+
+For provider setup:
+
+- Click `Add Provider`
+- Use the `Catalog` tab to browse curated free-provider presets sourced from `references/`
+- Search presets, inspect compatibility, and choose `Use Preset` for providers marked `Ready now`
+- Review the pre-filled provider form and save it
+- For unsupported protocols, the preset remains visible as `Coming soon`
+
+For model setup:
+
+- Expand the provider row and click `Add Model`
+- Use `Discover` to fetch upstream models from `/v1/models`
+- Search large model lists, filter by type/capabilities, and use the recommended ranking view
+- Select a discovered model to pre-fill the model form, then save
+
+### Without the UI
+
+Use the CLI with the provider-first workflow.
+
+For curated free providers from `references/`:
+
+```bash
+# Import the curated registry and load credentials from .env
+waypoi providers import -f .env
+
+# Inspect imported providers
+waypoi providers
+waypoi providers show openrouter
+
+# Inspect provider models
+waypoi models openrouter
+waypoi models show openrouter/openai-gpt-oss-120b
+```
+
+For manual provider/model setup:
+
+```bash
+# Add or update a provider through the provider-first commands/docs
+# then add models beneath it
+waypoi models add <providerId> --model-id <id> --upstream <provider-model-name> --base-url <url>
+waypoi models update <providerId> <modelRef> [patch options]
+```
+
+Imported providers use the curated registry as metadata source. The UI catalog and the CLI import path both derive from the same `references/` dataset.
+
+Notes for free providers:
+
+- some providers expose standard `/v1/models` discovery
+- some require discovery fallbacks such as `/models`
+- some are cataloged for visibility but are not yet directly routable in Waypoi
+- free-tier availability, limits, and access policies still depend on the upstream provider account and token
+
+## Legacy Endpoint Commands
 
 ```bash
 # Via CLI
@@ -215,6 +319,7 @@ For `stream: true`, Waypoi emits Responses-style SSE events (`response.created`,
 | `GET/POST/DELETE /admin/mcp/servers` | MCP server CRUD |
 | `GET /admin/mcp/tools` | List discovered tools |
 | `POST /admin/mcp/tools/execute` | Execute a tool |
+| `GET /admin/provider-catalog?source=free` | Curated free-provider preset catalog |
 | `GET /admin/providers` | Provider catalog |
 | `GET /admin/providers/:id` | Provider details |
 | `GET /admin/pools` | Smart pool definitions |
@@ -323,7 +428,7 @@ waypoi mcp disable <id|name>        # Disable server
 
 # Provider catalog + smart pools
 waypoi providers                    # List providers (canonical)
-waypoi providers import -f .env     # Import providers and credentials, rebuild pools
+waypoi providers import -f .env     # Import curated providers from references/ and load credentials
 waypoi providers show <providerId>  # Show one provider
 waypoi providers update <providerId> --insecure-tls|--strict-tls
 waypoi providers update <providerId> --auto-insecure-domain ai-application.stjude.org
@@ -403,7 +508,21 @@ Access the playground at `http://localhost:9469/ui`:
 - **Playground** — Chat interface with session history, image upload (VL models), and agent mode
 - **Dashboard** — Real-time stats with latency charts, token usage, endpoint health, and **usage guides** with copy-paste code snippets (cURL, Python, Node.js)
 - **Peek** — Calendar browser for captured requests, timeline inspection, media artifacts, and token-flow analysis
-- **Settings** — Provider/model catalog management, MCP guidance, and image defaults
+- **Settings** — Provider/model catalog management, curated free-provider presets, ranked model discovery, MCP guidance, and image defaults
+
+### Settings Provider Workflow
+
+The `Settings` page now supports two provider onboarding modes:
+
+- `Catalog` — curated free-provider presets from `references/`, with compatibility labels like `Ready now` and `Coming soon`
+- `Manual` — direct provider entry for custom or private backends
+
+After adding a provider, `Add Model` supports:
+
+- upstream model discovery from `/v1/models`
+- inline search for large provider catalogs
+- ranking that prefers free-tier matches, higher `benchmark.livebench` scores, and richer capabilities
+- filters for endpoint type, tools, vision, streaming, and free-only results
 
 ### Endpoint Usage Guides
 

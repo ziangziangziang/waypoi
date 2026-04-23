@@ -41,7 +41,12 @@ type CandidateRequirements = {
 
 export type ResolveModelResult =
   | { kind: "pool"; alias: string }
-  | { kind: "direct"; canonicalId: string; candidates: PoolCandidate[] }
+  | {
+      kind: "direct";
+      canonicalId: string;
+      candidates: PoolCandidate[];
+      unsupportedReason?: "unsupported_operation" | "stream_unsupported";
+    }
   | { kind: "deprecated_pool_alias"; input: string; replacement: typeof SMART_ALIAS }
   | { kind: "ambiguous"; input: string; matches: string[] }
   | { kind: "none"; input: string };
@@ -50,6 +55,11 @@ interface FlattenedProviderModel {
   provider: ProviderRecord;
   model: ProviderModelRecord;
   canonicalId: string;
+}
+
+interface CandidateBuildResult {
+  candidates: PoolCandidate[];
+  unsupportedReason?: "unsupported_operation" | "stream_unsupported";
 }
 
 export async function listModelsForApi(
@@ -110,7 +120,7 @@ export async function resolveModel(
     return entry.canonicalId === inputId || entry.model.providerModelId === inputId;
   });
   if (canonicalMatch) {
-    const candidates = await buildAndFilterCandidates(
+    const result = await buildAndFilterCandidates(
       paths,
       [canonicalMatch],
       requirements,
@@ -120,7 +130,8 @@ export async function resolveModel(
     return {
       kind: "direct",
       canonicalId: canonicalMatch.canonicalId,
-      candidates,
+      candidates: result.candidates,
+      unsupportedReason: result.unsupportedReason,
     };
   }
 
@@ -143,7 +154,7 @@ export async function resolveModel(
   }
 
   const winner = aliasMatches[0];
-  const candidates = await buildAndFilterCandidates(
+  const result = await buildAndFilterCandidates(
     paths,
     [winner],
     requirements,
@@ -153,7 +164,8 @@ export async function resolveModel(
   return {
     kind: "direct",
     canonicalId: winner.canonicalId,
-    candidates,
+    candidates: result.candidates,
+    unsupportedReason: result.unsupportedReason,
   };
 }
 
@@ -284,9 +296,11 @@ async function buildAndFilterCandidates(
   requirements: CandidateRequirements,
   routing?: { operation: ProtocolOperation; stream: boolean },
   healthMap?: Record<string, { status?: "up" | "down" }>
-): Promise<PoolCandidate[]> {
+): Promise<CandidateBuildResult> {
   const accepted: PoolCandidate[] = [];
   const modelHealth = healthMap ?? (await getProviderModelHealthMap(paths));
+  let sawUnsupportedOperation = false;
+  let sawStreamUnsupported = false;
   for (const entry of entries) {
     const candidate = buildCandidate(entry.provider, entry.model);
     if (!candidate.providerEnabled || !candidate.modelEnabled) {
@@ -317,17 +331,32 @@ async function buildAndFilterCandidates(
         requiredOutput: requirements.requiredOutput,
       });
       if (!support.supported) {
+        if (support.reason === "stream_unsupported") {
+          sawStreamUnsupported = true;
+        } else if (support.reason === "unsupported_operation") {
+          sawUnsupportedOperation = true;
+        }
         continue;
       }
     }
     accepted.push(candidate);
   }
-  return accepted.sort((a, b) => {
-    if (b.score !== a.score) {
-      return b.score - a.score;
-    }
-    return a.id.localeCompare(b.id);
-  });
+  return {
+    candidates: accepted.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      return a.id.localeCompare(b.id);
+    }),
+    unsupportedReason:
+      accepted.length === 0
+        ? sawStreamUnsupported
+          ? "stream_unsupported"
+          : sawUnsupportedOperation
+            ? "unsupported_operation"
+            : undefined
+        : undefined,
+  };
 }
 
 function shouldRespectHealthStatus(protocol: string): boolean {

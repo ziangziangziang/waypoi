@@ -418,3 +418,514 @@ test("admin provider model discovery supports providers whose base URL already e
   await app.close();
   await upstream.close();
 });
+
+test("admin provider model discovery falls back to /models and normalizes array-style listings", async () => {
+  const upstream = await startUpstreamServer((req, res) => {
+    if (req.url === "/v1/models") {
+      res.statusCode = 404;
+      res.end("not found");
+      return;
+    }
+    assert.equal(req.url, "/models");
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify([
+      {
+        id: "azureml://registries/azure-openai/models/gpt-4o/versions/2",
+        name: "gpt-4o",
+        task: "chat-completion",
+      },
+      {
+        id: "azureml://registries/azure-openai/models/text-embedding-3-small/versions/1",
+        name: "text-embedding-3-small",
+        task: "embeddings",
+      },
+    ]));
+  });
+
+  const baseDir = await makeWorkspaceTempDir("waypoi-provider-discovery-array-test-");
+  const paths = makePaths(baseDir);
+  const app = Fastify();
+  await registerAdminRoutes(app, paths, { adminToken: "test-token", version: "0.0.0" });
+  const auth = { authorization: "Bearer test-token" };
+
+  const createRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {
+      id: "demo-array",
+      name: "Demo Array Provider",
+      protocol: "openai",
+      baseUrl: upstream.baseUrl,
+      enabled: true,
+      supportsRouting: true,
+    },
+  });
+  assert.equal(createRes.statusCode, 201);
+
+  const discoveryRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers/demo-array/models/discover",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {},
+  });
+  assert.equal(discoveryRes.statusCode, 200);
+  const discoveryJson = discoveryRes.json() as {
+    models: Array<{
+      id: string;
+      capabilities?: {
+        input: string[];
+        output: string[];
+      };
+    }>;
+  };
+  assert.deepEqual(discoveryJson.models, [
+    {
+      id: "gpt-4o",
+      capabilities: {
+        input: ["text"],
+        output: ["text"],
+        source: "inferred",
+      },
+    },
+    {
+      id: "text-embedding-3-small",
+      capabilities: {
+        input: ["text"],
+        output: ["embedding"],
+        source: "inferred",
+      },
+    },
+  ]);
+
+  await app.close();
+  await upstream.close();
+});
+
+test("admin provider model discovery supports Cloudflare ai/models/search fallback", async () => {
+  const upstream = await startUpstreamServer((req, res) => {
+    if (req.url === "/client/v4/accounts/demo-account/ai/models/search") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        success: true,
+        result: [
+          {
+            id: "uuid-1",
+            name: "@cf/meta/llama-3.1-8b-instruct",
+            task: { name: "Text Generation" },
+            properties: [{ property_id: "function_calling", value: "true" }],
+          },
+          {
+            id: "uuid-2",
+            name: "@cf/baai/bge-large-en-v1.5",
+            task: { name: "Text Embeddings" },
+          },
+        ],
+      }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end("not found");
+  });
+
+  const baseDir = await makeWorkspaceTempDir("waypoi-provider-discovery-cloudflare-search-test-");
+  const paths = makePaths(baseDir);
+  const app = Fastify();
+  await registerAdminRoutes(app, paths, { adminToken: "test-token", version: "0.0.0" });
+  const auth = { authorization: "Bearer test-token" };
+
+  const createRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {
+      id: "cloudflare",
+      name: "Cloudflare Workers AI",
+      protocol: "cloudflare",
+      baseUrl: `${upstream.baseUrl}/client/v4/accounts/demo-account/ai/v1`,
+      enabled: true,
+      supportsRouting: true,
+    },
+  });
+  assert.equal(createRes.statusCode, 201);
+
+  const discoveryRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers/cloudflare/models/discover",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {},
+  });
+  assert.equal(discoveryRes.statusCode, 200);
+  const discoveryJson = discoveryRes.json() as {
+    models: Array<{
+      id: string;
+      free?: boolean;
+      capabilities?: {
+        input: string[];
+        output: string[];
+        supportsTools?: boolean;
+        source?: string;
+      };
+    }>;
+  };
+  assert.ok(
+    discoveryJson.models.some(
+      (model) =>
+        model.id === "@cf/meta/llama-3.1-8b-instruct" &&
+        model.free === true &&
+        model.capabilities?.output.includes("text") &&
+        model.capabilities?.supportsTools === true
+    )
+  );
+  assert.equal(
+    discoveryJson.models.some((model) => model.id === "@cf/baai/bge-large-en-v1.5"),
+    false
+  );
+
+  await app.close();
+  await upstream.close();
+});
+
+test("admin provider catalog exposes free presets with compatibility status", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-provider-catalog-test-");
+  const paths = makePaths(baseDir);
+  const app = Fastify();
+  await registerAdminRoutes(app, paths, { adminToken: "test-token", version: "0.0.0" });
+  const auth = { authorization: "Bearer test-token" };
+
+  const res = await app.inject({
+    method: "GET",
+    url: "/admin/provider-catalog?source=free",
+    headers: auth,
+  });
+  assert.equal(res.statusCode, 200);
+  const json = res.json() as {
+    data: Array<{
+      id: string;
+      source: string;
+      free: boolean;
+      readiness: "ready" | "unsupported";
+      modelSummary: { total: number };
+      preset: { id: string; baseUrl: string; protocol: string };
+    }>;
+  };
+
+  const openrouter = json.data.find((entry) => entry.id === "openrouter");
+  assert.ok(openrouter);
+  assert.equal(openrouter.source, "free");
+  assert.equal(openrouter.free, true);
+  assert.equal(openrouter.readiness, "ready");
+  assert.equal(openrouter.preset.id, "openrouter");
+  assert.match(openrouter.preset.baseUrl, /^https:\/\//);
+  assert.equal(openrouter.preset.protocol, "openai");
+  assert.ok(openrouter.modelSummary.total > 0);
+
+  const gemini = json.data.find((entry) => entry.id === "gemini");
+  assert.ok(gemini);
+  assert.equal(gemini.readiness, "ready");
+  assert.equal(gemini.preset.protocol, "gemini");
+
+  const cloudflare = json.data.find((entry) => entry.id === "cloudflare");
+  assert.ok(cloudflare);
+  assert.equal(cloudflare.readiness, "ready");
+  assert.equal(cloudflare.preset.protocol, "cloudflare");
+
+  await app.close();
+});
+
+test("admin provider model discovery uses Gemini /models and enriches multimodal capabilities", async () => {
+  const upstream = await startUpstreamServer((req, res) => {
+    assert.match(req.url ?? "", /^\/v1beta\/models\?/);
+    assert.equal(req.headers["x-goog-api-key"], "gemini-secret");
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      models: [
+        {
+          name: "models/gemini-3-flash-preview",
+          supportedGenerationMethods: ["generateContent", "streamGenerateContent"],
+        },
+        {
+          name: "models/text-embedding-004",
+          supportedGenerationMethods: ["embedContent"],
+        },
+      ],
+    }));
+  });
+
+  const baseDir = await makeWorkspaceTempDir("waypoi-provider-discovery-gemini-models-test-");
+  const paths = makePaths(baseDir);
+  const app = Fastify();
+  await registerAdminRoutes(app, paths, { adminToken: "test-token", version: "0.0.0" });
+  const auth = { authorization: "Bearer test-token" };
+
+  const createRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {
+      id: "gemini",
+      name: "Google AI Studio (Gemini)",
+      protocol: "gemini",
+      baseUrl: `${upstream.baseUrl}/v1beta`,
+      apiKey: "gemini-secret",
+      enabled: true,
+      supportsRouting: true,
+    },
+  });
+  assert.equal(createRes.statusCode, 201);
+
+  const discoveryRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers/gemini/models/discover",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {},
+  });
+  assert.equal(discoveryRes.statusCode, 200);
+  const discoveryJson = discoveryRes.json() as {
+    models: Array<{
+      id: string;
+      free?: boolean;
+      benchmark?: {
+        livebench?: number;
+      };
+      capabilities?: {
+        input: string[];
+        output: string[];
+        supportsStreaming?: boolean;
+        source?: string;
+      };
+    }>;
+  };
+  assert.ok(
+    discoveryJson.models.some(
+      (model) =>
+        model.id === "gemini-3-flash-preview" &&
+        model.free === true &&
+        typeof model.benchmark?.livebench === "number" &&
+        model.capabilities?.input.includes("image") &&
+        model.capabilities?.supportsStreaming === true
+    )
+  );
+  assert.equal(
+    discoveryJson.models.some((model) => model.id === "text-embedding-004"),
+    false
+  );
+
+  await app.close();
+  await upstream.close();
+});
+
+test("admin provider model discovery surfaces Gemini model-list failures without curated fallback", async () => {
+  const upstream = await startUpstreamServer((req, res) => {
+    assert.match(req.url ?? "", /^\/v1beta\/models\?/);
+    res.statusCode = 500;
+    res.end("models failed");
+  });
+
+  const baseDir = await makeWorkspaceTempDir("waypoi-provider-discovery-gemini-failure-test-");
+  const paths = makePaths(baseDir);
+  const app = Fastify();
+  await registerAdminRoutes(app, paths, { adminToken: "test-token", version: "0.0.0" });
+  const auth = { authorization: "Bearer test-token" };
+
+  const createRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {
+      id: "gemini",
+      name: "Google AI Studio (Gemini)",
+      protocol: "gemini",
+      baseUrl: `${upstream.baseUrl}/v1beta`,
+      enabled: true,
+      supportsRouting: true,
+    },
+  });
+  assert.equal(createRes.statusCode, 201);
+
+  const discoveryRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers/gemini/models/discover",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {},
+  });
+  assert.equal(discoveryRes.statusCode, 502);
+  assert.match(JSON.stringify(discoveryRes.json()), /model discovery failed with status 500/);
+
+  await app.close();
+  await upstream.close();
+});
+
+test("admin provider model discovery surfaces Cloudflare search failures without curated fallback", async () => {
+  const upstream = await startUpstreamServer((req, res) => {
+    assert.equal(req.url, "/client/v4/accounts/demo-account/ai/models/search");
+    res.statusCode = 500;
+    res.end("search failed");
+  });
+
+  const baseDir = await makeWorkspaceTempDir("waypoi-provider-discovery-cloudflare-failure-test-");
+  const paths = makePaths(baseDir);
+  const app = Fastify();
+  await registerAdminRoutes(app, paths, { adminToken: "test-token", version: "0.0.0" });
+  const auth = { authorization: "Bearer test-token" };
+
+  const createRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {
+      id: "cloudflare",
+      name: "Cloudflare Workers AI",
+      protocol: "cloudflare",
+      baseUrl: `${upstream.baseUrl}/client/v4/accounts/demo-account/ai/v1`,
+      enabled: true,
+      supportsRouting: true,
+    },
+  });
+  assert.equal(createRes.statusCode, 201);
+
+  const discoveryRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers/cloudflare/models/discover",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {},
+  });
+  assert.equal(discoveryRes.statusCode, 502);
+  assert.match(
+    JSON.stringify(discoveryRes.json()),
+    /model discovery failed with status 500/
+  );
+
+  await app.close();
+  await upstream.close();
+});
+
+test("admin provider model discovery uses Ollama /api/tags and normalizes chat models", async () => {
+  const upstream = await startUpstreamServer((req, res) => {
+    assert.equal(req.url, "/api/tags");
+    assert.equal(req.headers.authorization, "Bearer ollama-secret");
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      models: [
+        {
+          name: "gpt-oss:120b",
+          model: "gpt-oss:120b",
+        },
+        {
+          name: "deepseek-v3.2",
+          model: "deepseek-v3.2",
+        },
+      ],
+    }));
+  });
+
+  const baseDir = await makeWorkspaceTempDir("waypoi-provider-discovery-ollama-tags-test-");
+  const paths = makePaths(baseDir);
+  const app = Fastify();
+  await registerAdminRoutes(app, paths, { adminToken: "test-token", version: "0.0.0" });
+  const auth = { authorization: "Bearer test-token" };
+
+  const createRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {
+      id: "ollama-cloud",
+      name: "Ollama Cloud",
+      protocol: "ollama",
+      baseUrl: `${upstream.baseUrl}/api`,
+      apiKey: "ollama-secret",
+      enabled: true,
+      supportsRouting: true,
+    },
+  });
+  assert.equal(createRes.statusCode, 201);
+
+  const discoveryRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers/ollama-cloud/models/discover",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {},
+  });
+  assert.equal(discoveryRes.statusCode, 200);
+  const discoveryJson = discoveryRes.json() as {
+    models: Array<{
+      id: string;
+      free?: boolean;
+      benchmark?: {
+        livebench?: number;
+      };
+      capabilities?: {
+        input: string[];
+        output: string[];
+        supportsStreaming?: boolean;
+        source?: string;
+      };
+    }>;
+  };
+  assert.ok(
+    discoveryJson.models.some(
+      (model) =>
+        model.id === "gpt-oss:120b" &&
+        model.free === true &&
+        model.capabilities?.supportsStreaming === true &&
+        model.capabilities?.output.includes("text")
+    )
+  );
+  assert.ok(
+    discoveryJson.models.some(
+      (model) =>
+        model.id === "deepseek-v3.2" &&
+        model.free === true &&
+        typeof model.benchmark?.livebench === "number" &&
+        model.capabilities?.supportsStreaming === true
+    )
+  );
+
+  await app.close();
+  await upstream.close();
+});
+
+test("admin provider model discovery surfaces Ollama tag failures without curated fallback", async () => {
+  const upstream = await startUpstreamServer((req, res) => {
+    assert.equal(req.url, "/api/tags");
+    res.statusCode = 500;
+    res.end("tags failed");
+  });
+
+  const baseDir = await makeWorkspaceTempDir("waypoi-provider-discovery-ollama-failure-test-");
+  const paths = makePaths(baseDir);
+  const app = Fastify();
+  await registerAdminRoutes(app, paths, { adminToken: "test-token", version: "0.0.0" });
+  const auth = { authorization: "Bearer test-token" };
+
+  const createRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {
+      id: "ollama-cloud",
+      name: "Ollama Cloud",
+      protocol: "ollama",
+      baseUrl: `${upstream.baseUrl}/api`,
+      enabled: true,
+      supportsRouting: true,
+    },
+  });
+  assert.equal(createRes.statusCode, 201);
+
+  const discoveryRes = await app.inject({
+    method: "POST",
+    url: "/admin/providers/ollama-cloud/models/discover",
+    headers: { ...auth, "content-type": "application/json" },
+    payload: {},
+  });
+  assert.equal(discoveryRes.statusCode, 502);
+  assert.match(
+    JSON.stringify(discoveryRes.json()),
+    /model discovery failed with status 500/
+  );
+
+  await app.close();
+  await upstream.close();
+});

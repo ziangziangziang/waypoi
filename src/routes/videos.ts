@@ -84,6 +84,7 @@ export async function registerVideoRoutes(app: FastifyInstance, paths: StoragePa
       }
       const status =
         errorType === "no_endpoints" ||
+        errorType === "unsupported_operation" ||
         errorType === "protocol_stream_unsupported" ||
         errorType === "unsupported_protocol" ||
         errorType === "invalid_protocol_config"

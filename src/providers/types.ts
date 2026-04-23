@@ -1,6 +1,6 @@
 import { EndpointType, ModelCapabilities, ModelModality } from "../types";
 
-export type ProviderProtocol = "openai" | "inference_v2" | "dashscope" | "unknown";
+export type ProviderProtocol = "openai" | "inference_v2" | "dashscope" | "cloudflare" | "ollama" | "gemini" | "unknown";
 
 export type ProviderAuthType = "bearer" | "query" | "header" | "none";
 
@@ -110,4 +110,61 @@ export interface EnvMap {
 export interface ProviderCapabilityRequirements {
   requiredInput: ModelModality[];
   requiredOutput: ModelModality[];
+}
+
+export interface ProviderCatalogPreset {
+  id: string;
+  name: string;
+  description?: string;
+  docs?: string;
+  protocol: ProviderProtocol;
+  protocolRaw?: string;
+  protocolConfig?: ProviderProtocolConfig;
+  baseUrl: string;
+  insecureTls?: boolean;
+  autoInsecureTlsDomains?: string[];
+  supportsRouting: boolean;
+  auth?: ProviderAuthConfig;
+  envVar?: string;
+  limits?: ProviderLimits;
+}
+
+export interface ProviderCatalogModelSummary {
+  total: number;
+  free: number;
+  benchmarked: number;
+}
+
+export interface ProviderCatalogModelMatch {
+  id: string;
+  upstreamModel: string;
+  free: boolean;
+  capabilities?: ModelCapabilities;
+  benchmark?: {
+    livebench?: number;
+  };
+  supportsTools?: boolean;
+  supportsStreaming?: boolean;
+  supportsVision?: boolean;
+}
+
+export interface ProviderCatalogEntry {
+  id: string;
+  source: "free";
+  name: string;
+  description?: string;
+  docs?: string;
+  free: boolean;
+  readiness: "ready" | "unsupported";
+  protocol: ProviderProtocol;
+  protocolRaw?: string;
+  modelSummary: ProviderCatalogModelSummary;
+  limits?: {
+    requestsPerMinute?: number;
+    requestsPerDay?: number;
+    tokensPerMinute?: number;
+    tokensPerDay?: number;
+  };
+  preset: ProviderCatalogPreset;
+  models: ProviderCatalogModelMatch[];
 }

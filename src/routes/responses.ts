@@ -187,6 +187,7 @@ export async function registerResponsesRoutes(app: FastifyInstance, paths: Stora
       }
       const status =
         errorType === "no_endpoints" ||
+        errorType === "unsupported_operation" ||
         errorType === "protocol_stream_unsupported" ||
         errorType === "unsupported_protocol" ||
         errorType === "invalid_protocol_config"

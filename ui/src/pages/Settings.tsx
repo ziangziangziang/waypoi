@@ -40,10 +40,12 @@ import {
   enableProvider,
   enableProviderModel,
   getAdminMeta,
+  listProviderCatalog,
   listProviders,
   listProtocols,
   updateProvider,
   updateProviderModel,
+  type ProviderCatalogEntry,
   type Provider,
   type ProviderModel,
   type ProtocolInfo,
@@ -62,6 +64,15 @@ import {
   toggleVirtualModel,
   type VirtualModel,
 } from '@/api/client'
+import {
+  filterAndRankDiscoveredModels,
+  filterProviderCatalogEntries,
+  getRecommendedDiscoveredModels,
+  providerPresetToFormPatch,
+  type DiscoveryFilterState,
+  type DiscoverySortMode,
+  type ProviderCatalogFilter,
+} from './providerCatalog'
 import {
   loadSettings,
   updateSetting,
@@ -122,6 +133,7 @@ type ModelFormValues = {
 export function Settings() {
   const [settings, setSettings] = useState<UserSettings>(loadSettings)
   const [providers, setProviders] = useState<Provider[]>([])
+  const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogEntry[]>([])
   const [virtualModels, setVirtualModels] = useState<VirtualModel[]>([])
   const [version, setVersion] = useState<string>('0.0.0')
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set())
@@ -141,9 +153,15 @@ export function Settings() {
     setIsLoadingProviders(true)
     setProviderError(null)
     try {
-      const [providerData, meta, vmData] = await Promise.all([listProviders(), getAdminMeta(), listVirtualModels()])
+      const [providerData, meta, vmData, catalogData] = await Promise.all([
+        listProviders(),
+        getAdminMeta(),
+        listVirtualModels(),
+        listProviderCatalog('free'),
+      ])
       setProviders(providerData)
       setVirtualModels(vmData)
+      setProviderCatalog(catalogData)
       setVersion(meta.version)
       setExpandedProviders((previous) => {
         const next = new Set<string>()
@@ -485,6 +503,7 @@ export function Settings() {
         <ProviderFormDialog
           title={providerForm.mode === 'create' ? 'Add Provider' : `Edit Provider ${providerForm.initial?.id}`}
           initialValues={providerForm.mode === 'create' ? emptyProviderForm() : providerToForm(providerForm.initial!)}
+          catalogEntries={providerCatalog}
           isEdit={providerForm.mode === 'edit'}
           onClose={() => setProviderForm(null)}
           onSubmit={async (values) => {
@@ -583,6 +602,7 @@ function OperationBadge({ operation }: { operation: string }) {
 function ProviderFormDialog(props: {
   title: string
   initialValues: ProviderFormValues
+  catalogEntries: ProviderCatalogEntry[]
   isEdit: boolean
   onClose: () => void
   onSubmit: (values: ProviderFormValues) => Promise<void>
@@ -595,6 +615,10 @@ function ProviderFormDialog(props: {
   const [detectResult, setDetectResult] = useState<'success' | 'warning' | 'error' | null>(null)
   const [detectMessage, setDetectMessage] = useState<string | null>(null)
   const [protocolFilter, setProtocolFilter] = useState('')
+  const [entryMode, setEntryMode] = useState<'catalog' | 'manual'>(props.isEdit ? 'manual' : 'catalog')
+  const [catalogSearch, setCatalogSearch] = useState('')
+  const [catalogFilter, setCatalogFilter] = useState<ProviderCatalogFilter>('all')
+  const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(null)
 
   useEffect(() => {
     void listProtocols().then(setProtocols).catch(() => {
@@ -696,11 +720,147 @@ function ProviderFormDialog(props: {
     p.label.toLowerCase().includes(protocolFilter.toLowerCase()) ||
     p.description.toLowerCase().includes(protocolFilter.toLowerCase())
   )
+  const filteredCatalog = filterProviderCatalogEntries(props.catalogEntries, catalogSearch, catalogFilter)
+  const selectedCatalogEntry = props.catalogEntries.find((entry) => entry.id === selectedCatalogId) ?? null
+
+  const applyCatalogPreset = (entry: ProviderCatalogEntry) => {
+    setValues((current) => ({
+      ...current,
+      ...providerPresetToFormPatch(entry.preset),
+    }))
+    setSelectedCatalogId(entry.id)
+    setEntryMode('manual')
+    setDetectResult('success')
+    setDetectMessage(`Loaded preset for ${entry.name}`)
+  }
 
   return (
     <Overlay title={props.title} onClose={props.onClose}>
       <div className="space-y-4">
         {error && <div className="text-sm text-destructive">{error}</div>}
+
+        {!props.isEdit && (
+          <div className="flex items-center gap-2 rounded-lg border border-border p-1">
+            <button
+              type="button"
+              onClick={() => setEntryMode('catalog')}
+              className={cn(
+                'flex-1 rounded-md px-3 py-2 text-sm transition-colors',
+                entryMode === 'catalog' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Catalog
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryMode('manual')}
+              className={cn(
+                'flex-1 rounded-md px-3 py-2 text-sm transition-colors',
+                entryMode === 'manual' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Manual
+            </button>
+          </div>
+        )}
+
+        {!props.isEdit && entryMode === 'catalog' && (
+          <div className="rounded border border-border p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Free Provider Catalog</p>
+                <p className="text-xs text-muted-foreground">
+                  Browse curated presets from <code>references/</code>. Compatible providers can pre-fill the standard provider form.
+                </p>
+              </div>
+              <span className="text-2xs text-muted-foreground">{props.catalogEntries.length} presets</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                className="h-8 text-sm"
+                placeholder="Search providers…"
+                value={catalogSearch}
+                onChange={(event) => setCatalogSearch(event.target.value)}
+              />
+              <select
+                className="h-8 rounded border border-input bg-transparent px-2 text-xs"
+                value={catalogFilter}
+                onChange={(event) => setCatalogFilter(event.target.value as ProviderCatalogFilter)}
+              >
+                <option value="all">All</option>
+                <option value="ready">Ready now</option>
+                <option value="unsupported">Coming soon</option>
+              </select>
+            </div>
+            <div className="space-y-2 max-h-80 overflow-auto pr-1">
+              {filteredCatalog.map((entry) => {
+                const ready = entry.readiness === 'ready'
+                const selected = entry.id === selectedCatalogId
+                return (
+                  <div
+                    key={entry.id}
+                    className={cn(
+                      'rounded-lg border p-3 transition-colors',
+                      selected ? 'border-primary bg-primary/5' : 'border-border'
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm">{entry.name}</span>
+                          <span className="text-2xs font-mono uppercase text-muted-foreground">{entry.protocolRaw ?? entry.protocol}</span>
+                          <span className="text-2xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20">Free</span>
+                          <span
+                            className={cn(
+                              'text-2xs px-1.5 py-0.5 rounded border',
+                              ready
+                                ? 'border-blue-500/20 bg-blue-500/10 text-blue-400'
+                                : 'border-amber-500/20 bg-amber-500/10 text-amber-400'
+                            )}
+                          >
+                            {ready ? 'Ready now' : 'Coming soon'}
+                          </span>
+                        </div>
+                        {entry.description && <p className="text-xs text-muted-foreground mt-1">{entry.description}</p>}
+                        <div className="flex items-center gap-3 flex-wrap text-2xs text-muted-foreground mt-2">
+                          <span>{entry.modelSummary.total} models</span>
+                          {entry.limits?.requestsPerMinute && <span>{entry.limits.requestsPerMinute} RPM</span>}
+                          {entry.limits?.requestsPerDay && <span>{entry.limits.requestsPerDay} RPD</span>}
+                          {entry.limits?.tokensPerMinute && <span>{entry.limits.tokensPerMinute} TPM</span>}
+                          {entry.limits?.tokensPerDay && <span>{entry.limits.tokensPerDay} TPD</span>}
+                        </div>
+                        {entry.docs && (
+                          <a
+                            href={entry.docs}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-2"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Docs
+                          </a>
+                        )}
+                      </div>
+                      <Button type="button" size="sm" variant="outline" disabled={!ready} onClick={() => applyCatalogPreset(entry)}>
+                        {ready ? 'Use Preset' : 'Unavailable'}
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+              {filteredCatalog.length === 0 && (
+                <div className="rounded border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                  No provider presets match the current filters.
+                </div>
+              )}
+            </div>
+            {selectedCatalogEntry && (
+              <div className="rounded border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+                Selected preset: <span className="font-medium text-foreground">{selectedCatalogEntry.name}</span>. The provider form is pre-filled and still editable before saving.
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <LabeledField label="Provider ID" description="Unique identifier, e.g. openrouter">
@@ -910,6 +1070,15 @@ function ModelFormDialog(props: {
   const [discoveryBaseUrl, setDiscoveryBaseUrl] = useState<string | null>(null)
   const [discoveredModels, setDiscoveredModels] = useState<DiscoveredProviderModel[]>([])
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [discoverySearch, setDiscoverySearch] = useState('')
+  const [discoverySort, setDiscoverySort] = useState<DiscoverySortMode>('recommended')
+  const [discoveryFilters, setDiscoveryFilters] = useState<DiscoveryFilterState>({
+    endpointType: 'all',
+    freeOnly: false,
+    toolsOnly: false,
+    visionOnly: false,
+    streamingOnly: false,
+  })
 
   const setField = <K extends keyof ModelFormValues>(key: K, value: ModelFormValues[K]) => {
     setValues((current) => ({ ...current, [key]: value }))
@@ -973,6 +1142,15 @@ function ModelFormDialog(props: {
 
   const inputModalities = new Set(parseCommaList(values.inputCapabilities))
   const outputModalities = new Set(parseCommaList(values.outputCapabilities))
+  const rankedDiscoveredModels = filterAndRankDiscoveredModels(
+    discoveredModels,
+    discoverySearch,
+    discoveryFilters,
+    discoverySort
+  )
+  const recommendedDiscoveredModels = getRecommendedDiscoveredModels(rankedDiscoveredModels)
+  const recommendedIds = new Set(recommendedDiscoveredModels.map((model) => model.id))
+  const remainingDiscoveredModels = rankedDiscoveredModels.filter((model) => !recommendedIds.has(model.id))
 
   return (
     <Overlay title={props.title} onClose={props.onClose}>
@@ -1002,20 +1180,86 @@ function ModelFormDialog(props: {
               <div className="text-sm text-muted-foreground">No models returned by upstream <code>/v1/models</code>.</div>
             )}
             {discoveredModels.length > 0 && (
-              <div className="space-y-1.5 max-h-48 overflow-auto pr-1">
-                {discoveredModels.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    onClick={() => applyDiscoveredModel(model)}
-                    className="w-full rounded border border-border px-3 py-2 text-left hover:border-primary/50 hover:bg-secondary/40 transition-colors"
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="h-8 text-sm"
+                    placeholder="Search discovered models…"
+                    value={discoverySearch}
+                    onChange={(event) => setDiscoverySearch(event.target.value)}
+                  />
+                  <select
+                    className="h-8 rounded border border-input bg-transparent px-2 text-xs"
+                    value={discoverySort}
+                    onChange={(event) => setDiscoverySort(event.target.value as DiscoverySortMode)}
                   >
-                    <div className="font-mono text-sm">{model.id}</div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {formatDiscoveryCapabilities(model)}
-                    </div>
+                    <option value="recommended">Recommended</option>
+                    <option value="alphabetical">A-Z</option>
+                  </select>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setDiscoveryFilters((current) => ({ ...current, freeOnly: !current.freeOnly }))}
+                    className={cn('text-xs px-2 py-1 rounded border', discoveryFilters.freeOnly ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground')}
+                  >
+                    Free
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => setDiscoveryFilters((current) => ({ ...current, toolsOnly: !current.toolsOnly }))}
+                    className={cn('text-xs px-2 py-1 rounded border', discoveryFilters.toolsOnly ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground')}
+                  >
+                    Tools
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiscoveryFilters((current) => ({ ...current, visionOnly: !current.visionOnly }))}
+                    className={cn('text-xs px-2 py-1 rounded border', discoveryFilters.visionOnly ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground')}
+                  >
+                    Vision
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiscoveryFilters((current) => ({ ...current, streamingOnly: !current.streamingOnly }))}
+                    className={cn('text-xs px-2 py-1 rounded border', discoveryFilters.streamingOnly ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground')}
+                  >
+                    Streaming
+                  </button>
+                  <select
+                    className="h-7 rounded border border-input bg-transparent px-2 text-xs"
+                    value={discoveryFilters.endpointType}
+                    onChange={(event) =>
+                      setDiscoveryFilters((current) => ({
+                        ...current,
+                        endpointType: event.target.value as DiscoveryFilterState['endpointType'],
+                      }))
+                    }
+                  >
+                    <option value="all">All types</option>
+                    {ENDPOINT_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{ENDPOINT_TYPE_INFO[option].label}</option>
+                    ))}
+                  </select>
+                </div>
+                {recommendedDiscoveredModels.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-2xs font-mono uppercase text-muted-foreground">Recommended</p>
+                    <div className="space-y-1.5 max-h-40 overflow-auto pr-1">
+                      {recommendedDiscoveredModels.map((model) => (
+                        <DiscoveredModelRow key={model.id} model={model} onSelect={applyDiscoveredModel} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-1.5 max-h-56 overflow-auto pr-1">
+                  {remainingDiscoveredModels.map((model) => (
+                    <DiscoveredModelRow key={model.id} model={model} onSelect={applyDiscoveredModel} />
+                  ))}
+                  {rankedDiscoveredModels.length === 0 && (
+                    <div className="text-sm text-muted-foreground">No discovered models match the current search and filters.</div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1268,6 +1512,36 @@ function ModelFormDialog(props: {
         </div>
       </div>
     </Overlay>
+  )
+}
+
+function DiscoveredModelRow(props: {
+  model: DiscoveredProviderModel
+  onSelect: (model: DiscoveredProviderModel) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => props.onSelect(props.model)}
+      className="w-full rounded border border-border px-3 py-2 text-left hover:border-primary/50 hover:bg-secondary/40 transition-colors"
+    >
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="font-mono text-sm">{props.model.id}</div>
+        {props.model.free === true && (
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-green-500/20 bg-green-500/10 text-green-400">
+            Free
+          </span>
+        )}
+        {typeof props.model.benchmark?.livebench === 'number' && (
+          <span className="text-2xs px-1.5 py-0.5 rounded border border-blue-500/20 bg-blue-500/10 text-blue-400">
+            LiveBench {props.model.benchmark.livebench.toFixed(1)}
+          </span>
+        )}
+      </div>
+      <div className="text-xs text-muted-foreground mt-1">
+        {formatDiscoveryCapabilities(props.model)}
+      </div>
+    </button>
   )
 }
 
