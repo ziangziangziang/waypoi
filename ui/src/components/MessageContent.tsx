@@ -189,8 +189,9 @@ const CopyButton = ({ text, className }: { text: string; className?: string }) =
 const CodeBlock = ({ 
   className, 
   children, 
+  inline, 
   ...props 
-}: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) => {
+}: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode; inline?: boolean }) => {
   const [copied, setCopied] = useState(false)
   const code = String(children).replace(/\n$/, '')
   const match = /language-(\w+)/.exec(className || '')
@@ -211,37 +212,47 @@ const CodeBlock = ({
     return <MermaidDiagram code={code} />
   }
 
+  const isSvgContent = (value: string) => {
+    const trimmed = value.trim()
+    return trimmed.startsWith('<svg') || trimmed.startsWith('<?xml')
+  }
+
+  const renderSvg = (value: string) => (
+    <div className="relative my-4 group">
+      <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={handleCopy}
+          className="p-1.5 rounded bg-secondary/80 hover:bg-secondary transition-colors"
+          title="Copy SVG"
+        >
+          {copied ? (
+            <Check className="w-3.5 h-3.5 text-green-500" />
+          ) : (
+            <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+          )}
+        </button>
+      </div>
+      <div 
+        className="p-4 bg-secondary/50 rounded-lg overflow-x-auto flex items-center justify-center"
+        dangerouslySetInnerHTML={{ __html: value }}
+      />
+    </div>
+  )
+
   // Render SVG code blocks as actual SVG
   if (language === 'svg') {
-    // Validate it looks like SVG before rendering
-    const trimmedCode = code.trim()
-    if (trimmedCode.startsWith('<svg') || trimmedCode.startsWith('<?xml')) {
-      return (
-        <div className="relative my-4 group">
-          <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={handleCopy}
-              className="p-1.5 rounded bg-secondary/80 hover:bg-secondary transition-colors"
-              title="Copy SVG"
-            >
-              {copied ? (
-                <Check className="w-3.5 h-3.5 text-green-500" />
-              ) : (
-                <Copy className="w-3.5 h-3.5 text-muted-foreground" />
-              )}
-            </button>
-          </div>
-          <div 
-            className="p-4 bg-secondary/50 rounded-lg overflow-x-auto flex items-center justify-center"
-            dangerouslySetInnerHTML={{ __html: code }}
-          />
-        </div>
-      )
+    if (isSvgContent(code)) {
+      return renderSvg(code)
     }
   }
 
+  // Auto-detect SVG in language-less or xml fenced code blocks
+  if ((!match || !language || language === 'xml') && !inline && isSvgContent(code)) {
+    return renderSvg(code)
+  }
+
   // Inline code
-  if (!match) {
+  if (inline || !match) {
     return (
       <code className="bg-secondary px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
         {children}

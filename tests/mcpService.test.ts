@@ -5,6 +5,11 @@ import { promises as fs } from "fs";
 import Fastify from "fastify";
 import { registerMcpServiceRoutes } from "../src/routes/mcpService";
 import { StoragePaths } from "../src/storage/files";
+import {
+  getCaptureRecordById,
+  listCaptureRecords,
+  updateCaptureConfig,
+} from "../src/storage/captureRepository";
 
 const MCP_HEADERS = {
   host: "localhost:8011",
@@ -134,7 +139,7 @@ test("mcp /mcp initialize, list tools, and call generate_image", async () => {
   assert.match(desc, /WAYPOI_MCP_OUTPUT_ROOT/);
   assert.match(desc, /file_path or file_paths/);
   const understandDesc = understandImageTool?.description ?? "";
-  assert.match(understandDesc, /Provide exactly one of image_path or image_url/);
+  assert.match(understandDesc, /Provide exactly one of image_path .* or image_url/);
   assert.match(understandDesc, /original-image pixel coordinates/);
 
   const call = await app.inject({
@@ -162,6 +167,109 @@ test("mcp /mcp initialize, list tools, and call generate_image", async () => {
   assert.equal(payload.ok, true);
   assert.equal(payload.model, "mock/diffusion");
   assert.match(payload.file_path, /^generated-images[/\\]image-1730000000-0\.png$/);
+
+  await app.close();
+});
+
+test("mcp tools/call requests are captured for Peek without session or discovery noise", async () => {
+  const baseDir = await makeWorkspaceTempDir("waypoi-mcp-capture-test-");
+  const paths = makePaths(baseDir);
+  await updateCaptureConfig(paths, { enabled: true });
+
+  const app = Fastify();
+  await registerMcpServiceRoutes(app, paths, {
+    runImageGeneration: async () => ({
+      model: "mock/diffusion",
+      statusCode: 200,
+      headers: { "content-type": "application/json" },
+      payload: { created: 1730000000, data: [{ b64_json: "AQID" }] },
+      route: {
+        endpointId: "ep-1",
+        endpointName: "mock",
+        upstreamModel: "upstream",
+      },
+    }),
+    normalizeImageGenerationPayload: async (_paths, payload, model) => ({
+      model,
+      created: (payload as { created: number }).created,
+      images: [{ index: 0, url: "data:image/png;base64,AQID", b64_json: "AQID" }],
+    }),
+  });
+
+  const init = await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: MCP_HEADERS,
+    payload: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+      },
+    },
+  });
+  assert.equal(init.statusCode, 200);
+  const sessionId = init.headers["mcp-session-id"] as string;
+
+  await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: { ...MCP_HEADERS, "mcp-session-id": sessionId },
+    payload: { jsonrpc: "2.0", method: "notifications/initialized", params: {} },
+  });
+
+  const listTools = await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: { ...MCP_HEADERS, "mcp-session-id": sessionId },
+    payload: {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/list",
+      params: {},
+    },
+  });
+  assert.equal(listTools.statusCode, 200);
+
+  const beforeCall = await listCaptureRecords(paths, 10);
+  assert.equal(beforeCall.total, 0);
+
+  const call = await app.inject({
+    method: "POST",
+    url: "/mcp",
+    headers: { ...MCP_HEADERS, "mcp-session-id": sessionId },
+    payload: {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "generate_image",
+        arguments: { prompt: "capture this image" },
+      },
+    },
+  });
+  assert.equal(call.statusCode, 200);
+
+  const listed = await listCaptureRecords(paths, 10);
+  assert.equal(listed.total, 1);
+  assert.equal(listed.data[0]?.route, "/mcp");
+
+  const captured = await getCaptureRecordById(paths, listed.data[0].id);
+  assert.ok(captured);
+  assert.equal(captured?.request.body && (captured.request.body as { method?: string }).method, "tools/call");
+  assert.equal(captured?.analysis.requestTimeline.length, 1);
+  assert.equal(captured?.analysis.requestTimeline[0]?.kind, "tool_call");
+  assert.equal(captured?.analysis.requestTimeline[0]?.name, "generate_image");
+  assert.match(captured?.analysis.requestTimeline[0]?.arguments ?? "", /capture this image/);
+
+  assert.equal(captured?.analysis.responseTimeline.length, 1);
+  assert.equal(captured?.analysis.responseTimeline[0]?.kind, "tool_result");
+  assert.equal(captured?.analysis.responseTimeline[0]?.toolCallId, "3");
+  assert.match(captured?.analysis.responseTimeline[0]?.content ?? "", /"ok": true/);
+  assert.match(captured?.analysis.responseTimeline[0]?.content ?? "", /"file_path"/);
 
   await app.close();
 });

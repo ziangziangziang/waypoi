@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import sharp from "sharp";
 import { routeRequest } from "../routing/router";
-import { selectPoolCandidates } from "../pools/scheduler";
+import { selectVirtualModelCandidates } from "../virtualModels/scheduler";
 import { pickBestProviderModelByCapabilities } from "../providers/modelRegistry";
 import { StoragePaths } from "../storage/files";
 
@@ -242,7 +242,7 @@ async function resolveVisionTextModel(paths: StoragePaths, requestedModel?: stri
     return requestedModel;
   }
 
-  const smart = await selectPoolCandidates(
+  const smart = await selectVirtualModelCandidates(
     paths,
     "smart",
     {

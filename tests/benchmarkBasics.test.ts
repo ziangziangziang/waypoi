@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { promises as fs } from 'fs'
 import { resolveBenchmarkConfig } from '../src/benchmark/config'
+import { normalizeBenchmarkRunRequest } from '../src/benchmark/request'
 import { validateScenarioCollection } from '../src/benchmark/schema'
 import { listBuiltInSuites, listSuiteExamples } from '../src/benchmark/suites'
 import type { StoragePaths } from '../src/storage/files'
@@ -65,6 +66,81 @@ test('benchmark config accepts run-level generation overrides', async () => {
   assert.equal(resolved.run.frequency_penalty, -0.4)
   assert.equal(resolved.run.seed, 9)
   assert.deepEqual(resolved.run.stop, ['END', 'STOP'])
+})
+
+test('benchmark request normalizer accepts simple model suite parameters', async () => {
+  const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'waypoi-bench-config-'))
+  const normalized = normalizeBenchmarkRunRequest({
+    model: 'smart',
+    suite: 'showcase',
+    parameters: {
+      temperature: 0.4,
+      top_p: 0.8,
+      max_tokens: 256,
+      presence_penalty: 0.3,
+      frequency_penalty: -0.4,
+      seed: 9,
+      stop: ['END', 'STOP'],
+    },
+  })
+  const resolved = await resolveBenchmarkConfig(makePaths(baseDir), normalized)
+
+  assert.equal(resolved.run.suite, 'showcase')
+  assert.equal(resolved.run.modelOverride, 'smart')
+  assert.equal(resolved.run.temperature, 0.4)
+  assert.equal(resolved.run.top_p, 0.8)
+  assert.equal(resolved.run.max_tokens, 256)
+  assert.equal(resolved.run.presence_penalty, 0.3)
+  assert.equal(resolved.run.frequency_penalty, -0.4)
+  assert.equal(resolved.run.seed, 9)
+  assert.deepEqual(resolved.run.stop, ['END', 'STOP'])
+})
+
+test('benchmark request normalizer keeps legacy top-level fields compatible', () => {
+  const normalized = normalizeBenchmarkRunRequest({
+    model: 'simple-model',
+    modelOverride: 'legacy-model',
+    suite: 'showcase',
+    parameters: {
+      temperature: 0.2,
+      top_p: 0.7,
+    },
+    temperature: 0.5,
+  })
+
+  assert.equal(normalized.modelOverride, 'legacy-model')
+  assert.equal(normalized.temperature, 0.5)
+  assert.equal(normalized.top_p, 0.7)
+})
+
+test('benchmark request parameters validate generation bounds through config resolution', async () => {
+  const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'waypoi-bench-config-'))
+  const paths = makePaths(baseDir)
+
+  await assert.rejects(
+    () => resolveBenchmarkConfig(paths, normalizeBenchmarkRunRequest({ suite: 'showcase', parameters: { top_p: 1.2 } })),
+    /run\.top_p must be between 0 and 1/
+  )
+  await assert.rejects(
+    () => resolveBenchmarkConfig(paths, normalizeBenchmarkRunRequest({ suite: 'showcase', parameters: { presence_penalty: -2.5 } })),
+    /run\.presence_penalty must be between -2 and 2/
+  )
+  await assert.rejects(
+    () => resolveBenchmarkConfig(paths, normalizeBenchmarkRunRequest({ suite: 'showcase', parameters: { frequency_penalty: 2.5 } })),
+    /run\.frequency_penalty must be between -2 and 2/
+  )
+  await assert.rejects(
+    () => resolveBenchmarkConfig(paths, normalizeBenchmarkRunRequest({ suite: 'showcase', parameters: { max_tokens: 0 } })),
+    /run\.max_tokens must be an integer >= 1/
+  )
+  await assert.rejects(
+    () => resolveBenchmarkConfig(paths, normalizeBenchmarkRunRequest({ suite: 'showcase', parameters: { seed: -1 } })),
+    /run\.seed must be an integer >= 0/
+  )
+  await assert.rejects(
+    () => resolveBenchmarkConfig(paths, normalizeBenchmarkRunRequest({ suite: 'showcase', parameters: { stop: [] } })),
+    /run\.stop must include at least one stop sequence/
+  )
 })
 
 test('scenario validation accepts showcase metadata, responses mode, and tool-name assertions', () => {

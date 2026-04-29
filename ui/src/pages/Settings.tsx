@@ -21,7 +21,6 @@ import {
   Headphones,
   BarChart3,
   AlertCircle,
-  Layers,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { EndpointUsageGuide } from '@/components/EndpointUsageGuide'
@@ -57,12 +56,6 @@ import {
   updateMcpServer,
   connectMcpServer,
   type McpServer,
-  listVirtualModels,
-  createVirtualModel,
-  updateVirtualModel,
-  deleteVirtualModel,
-  toggleVirtualModel,
-  type VirtualModel,
 } from '@/api/client'
 import {
   filterAndRankDiscoveredModels,
@@ -134,7 +127,6 @@ export function Settings() {
   const [settings, setSettings] = useState<UserSettings>(loadSettings)
   const [providers, setProviders] = useState<Provider[]>([])
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogEntry[]>([])
-  const [virtualModels, setVirtualModels] = useState<VirtualModel[]>([])
   const [version, setVersion] = useState<string>('0.0.0')
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set())
   const [isLoadingProviders, setIsLoadingProviders] = useState(true)
@@ -142,7 +134,6 @@ export function Settings() {
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [providerForm, setProviderForm] = useState<{ mode: 'create' | 'edit'; initial?: Provider } | null>(null)
   const [modelForm, setModelForm] = useState<{ provider: Provider; initial?: ProviderModel } | null>(null)
-  const [vmForm, setVmForm] = useState<{ mode: 'create' | 'edit'; initial?: VirtualModel } | null>(null)
 
   const handleImageSizeChange = (size: ImageSize) => {
     const updated = updateSetting('defaultImageSize', size)
@@ -153,14 +144,12 @@ export function Settings() {
     setIsLoadingProviders(true)
     setProviderError(null)
     try {
-      const [providerData, meta, vmData, catalogData] = await Promise.all([
+      const [providerData, meta, catalogData] = await Promise.all([
         listProviders(),
         getAdminMeta(),
-        listVirtualModels(),
         listProviderCatalog('free'),
       ])
       setProviders(providerData)
-      setVirtualModels(vmData)
       setProviderCatalog(catalogData)
       setVersion(meta.version)
       setExpandedProviders((previous) => {
@@ -430,14 +419,6 @@ export function Settings() {
             </div>
           </div>
 
-          <VirtualModelsPanel
-            virtualModels={virtualModels}
-            providers={providers}
-            onReload={() => void loadData()}
-            onCreate={() => setVmForm({ mode: 'create' })}
-            onEdit={(vm) => setVmForm({ mode: 'edit', initial: vm })}
-          />
-
           <McpServersPanel />
 
           <div className="panel">
@@ -538,34 +519,6 @@ export function Settings() {
         />
       )}
 
-      {vmForm && (
-        <VirtualModelFormDialog
-          title={vmForm.mode === 'create' ? 'Create Virtual Model' : `Edit Virtual Model ${vmForm.initial?.id}`}
-          initialValues={vmForm.mode === 'create' ? emptyVmForm() : vmToForm(vmForm.initial!)}
-          allProviderModels={providers.flatMap((p) =>
-            p.models.map((m) => ({
-              key: `${p.id}/${m.modelId}`,
-              providerId: p.id,
-              modelId: m.modelId,
-              endpointType: m.endpointType,
-              modalities: m.modalities ?? [],
-              capabilities: m.capabilities,
-            }))
-          )}
-          isEdit={vmForm.mode === 'edit'}
-          onClose={() => setVmForm(null)}
-          onSubmit={async (values) => {
-            const payload = parseVmForm(values)
-            if (vmForm.mode === 'create') {
-              await createVirtualModel(payload)
-            } else {
-              await updateVirtualModel(vmForm.initial!.id, payload)
-            }
-            setVmForm(null)
-            await loadData()
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -1836,277 +1789,6 @@ function formatDiscoveryCapabilities(model: DiscoveredProviderModel): string {
 // ─────────────────────────────────────────────────────────────────────────────
 // Virtual Models Panel
 // ─────────────────────────────────────────────────────────────────────────────
-
-function VirtualModelsPanel(props: {
-  virtualModels: VirtualModel[]
-  providers: Provider[]
-  onReload: () => void
-  onCreate: () => void
-  onEdit: (vm: VirtualModel) => void
-}) {
-  const [busy, setBusy] = useState<string | null>(null)
-
-  const run = async (key: string, fn: () => Promise<void>) => {
-    setBusy(key)
-    try { await fn(); props.onReload() }
-    catch { /* errors handled by parent */ }
-    finally { setBusy(null) }
-  }
-
-  return (
-    <div className="panel">
-      <div className="panel-header">
-        <Layers className="w-4 h-4 text-muted-foreground" />
-        <span className="panel-title">Virtual Models</span>
-        <span className="text-2xs text-muted-foreground ml-auto">{props.virtualModels.length} virtual models</span>
-        <Button size="sm" variant="outline" onClick={props.onCreate}>
-          <Plus className="w-3.5 h-3.5 mr-1" />
-          Create Virtual Model
-        </Button>
-      </div>
-      <div className="p-4 space-y-3">
-        <p className="text-xs text-muted-foreground">
-          Virtual models act as a single model backed by one or more real models. Useful for A/B testing and aggregating usage across providers.
-        </p>
-        {props.virtualModels.length === 0 && (
-          <div className="rounded border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-            No virtual models configured.
-          </div>
-        )}
-        {props.virtualModels.map((vm) => {
-          const candidateNames = vm.candidates.map((c) => `${c.providerId}/${c.modelId}`)
-          return (
-            <div key={vm.id} className="rounded-lg border border-border overflow-hidden">
-              <div className="px-4 py-3 flex items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <div className={cn('status-dot', vm.enabled ? 'status-dot-live' : 'status-dot-down')} />
-                    <p className="font-medium text-sm">{vm.name}</p>
-                    <span className="text-2xs uppercase text-muted-foreground">{vm.id}</span>
-                  </div>
-                  <p className="text-2xs text-muted-foreground mt-1">
-                    {vm.candidates.length} candidate{vm.candidates.length !== 1 ? 's' : ''} · {vm.strategy.replace(/_/g, ' ')}
-                  </p>
-                  {candidateNames.length > 0 && (
-                    <p className="text-2xs text-muted-foreground mt-0.5 truncate font-mono">
-                      {candidateNames.join(', ')}
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy === `toggle:${vm.id}`}
-                    onClick={() => void run(`toggle:${vm.id}`, async () => {
-                      await toggleVirtualModel(vm.id)
-                    })}
-                  >
-                    <Power className="w-3.5 h-3.5 mr-1" />
-                    {vm.enabled ? 'Disable' : 'Enable'}
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => props.onEdit(vm)}>
-                    <Pencil className="w-3.5 h-3.5 mr-1" />
-                    Edit
-                  </Button>
-                  {vm.userDefined && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-destructive hover:text-destructive"
-                      disabled={busy === `delete:${vm.id}`}
-                      onClick={() => {
-                        if (!window.confirm(`Delete virtual model ${vm.id}?`)) return
-                        void run(`delete:${vm.id}`, async () => {
-                          await deleteVirtualModel(vm.id)
-                        })
-                      }}
-                    >
-                      <Trash2 className="w-3.5 h-3.5 mr-1" />
-                      Delete
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function VirtualModelFormDialog(props: {
-  title: string
-  initialValues: VmFormValues
-  allProviderModels: Array<{ key: string; providerId: string; modelId: string; endpointType: EndpointType; modalities: string[]; capabilities: { input: string[]; output: string[] } }>
-  isEdit: boolean
-  onClose: () => void
-  onSubmit: (values: VmFormValues) => Promise<void>
-}) {
-  const [values, setValues] = useState<VmFormValues>(props.initialValues)
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [filter, setFilter] = useState<string>('all')
-  const [search, setSearch] = useState('')
-
-  const setField = <K extends keyof VmFormValues>(key: K, value: VmFormValues[K]) => {
-    setValues((current) => ({ ...current, [key]: value }))
-  }
-
-  const toggleCandidate = (key: string) => {
-    const sel = new Set(values.candidateSelection)
-    if (sel.has(key)) sel.delete(key)
-    else sel.add(key)
-    setField('candidateSelection', Array.from(sel))
-  }
-
-  const filteredModels = props.allProviderModels.filter((m) => {
-    if (filter !== 'all' && m.endpointType !== filter) return false
-    if (search && !m.key.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
-
-  const groupedByProvider = new Map<string, typeof filteredModels>()
-  for (const m of filteredModels) {
-    const list = groupedByProvider.get(m.providerId) ?? []
-    list.push(m)
-    groupedByProvider.set(m.providerId, list)
-  }
-
-  const selectedCount = values.candidateSelection.length
-  const providerCount = new Set(values.candidateSelection.map((k) => k.split('/')[0])).size
-
-  return (
-    <Overlay title={props.title} onClose={props.onClose}>
-      <div className="space-y-4">
-        {error && <div className="text-sm text-destructive">{error}</div>}
-        <div className="grid grid-cols-2 gap-3">
-          <LabeledField label="Virtual Model ID" description="Unique identifier used in API requests">
-            <Input value={values.id} onChange={(event) => setField('id', event.target.value)} disabled={props.isEdit} />
-          </LabeledField>
-          <LabeledField label="Display Name" description="Friendly name shown in the UI">
-            <Input value={values.name} onChange={(event) => setField('name', event.target.value)} />
-          </LabeledField>
-        </div>
-        <LabeledField label="Strategy">
-          <select className="w-full h-9 rounded-md border border-input bg-transparent px-3 text-sm" value={values.strategy} onChange={(event) => setField('strategy', event.target.value as VmFormValues['strategy'])}>
-            <option value="highest_rank_available">Highest Rank Available</option>
-            <option value="remaining_limit">Remaining Limit (failover on quota exhausted)</option>
-          </select>
-        </LabeledField>
-
-        <div>
-          <label className="block">
-            <span className="text-xs font-mono uppercase text-muted-foreground">Backend Models</span>
-          </label>
-          <div className="flex items-center gap-2 mt-2">
-            <select className="h-8 rounded border border-input bg-transparent px-2 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
-              <option value="all">All types</option>
-              {ENDPOINT_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-            </select>
-            <Input className="h-8 text-sm" placeholder="Search models…" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-          <div className="mt-2 space-y-2 max-h-64 overflow-auto pr-1">
-            {Array.from(groupedByProvider.entries()).map(([providerId, models]) => {
-              const selectedInGroup = models.filter((m) => values.candidateSelection.includes(m.key)).length
-              return (
-                <div key={providerId} className="rounded border border-border">
-                  <div className="px-3 py-1.5 bg-secondary/50 text-xs font-medium text-muted-foreground">
-                    {providerId} ({selectedInGroup}/{models.length} selected)
-                  </div>
-                  {models.map((m) => {
-                    const isSelected = values.candidateSelection.includes(m.key)
-                    const inputStr = m.capabilities.input?.join('+') ?? '?'
-                    const outputStr = m.capabilities.output?.join('+') ?? '?'
-                    return (
-                      <button
-                        key={m.key}
-                        type="button"
-                        onClick={() => toggleCandidate(m.key)}
-                        className={cn(
-                          'w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors border-t border-border/50',
-                          isSelected ? 'bg-primary/5' : 'hover:bg-secondary/30'
-                        )}
-                      >
-                        <input type="checkbox" checked={isSelected} readOnly className="shrink-0" />
-                        <span className="font-mono flex-1 truncate">{m.modelId}</span>
-                        <span className="text-2xs uppercase text-muted-foreground shrink-0">{m.endpointType}</span>
-                        <span className="text-2xs text-muted-foreground shrink-0">{inputStr} → {outputStr}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )
-            })}
-          </div>
-          {selectedCount > 0 && (
-            <p className="text-xs text-muted-foreground mt-2">
-              {selectedCount} model{selectedCount !== 1 ? 's' : ''} selected across {providerCount} provider{providerCount !== 1 ? 's' : ''}
-            </p>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={props.onClose} disabled={saving}>Cancel</Button>
-          <Button
-            onClick={async () => {
-              setSaving(true)
-              setError(null)
-              try {
-                await props.onSubmit(values)
-              } catch (err) {
-                setError(getErrorMessage(err, 'Failed to save virtual model'))
-              } finally {
-                setSaving(false)
-              }
-            }}
-            disabled={saving}
-          >
-            {props.isEdit ? 'Update' : 'Create'} Virtual Model
-          </Button>
-        </div>
-      </div>
-    </Overlay>
-  )
-}
-
-type VmFormValues = {
-  id: string
-  name: string
-  strategy: 'highest_rank_available' | 'remaining_limit'
-  candidateSelection: string[]
-}
-
-function emptyVmForm(): VmFormValues {
-  return {
-    id: '',
-    name: '',
-    strategy: 'highest_rank_available',
-    candidateSelection: [],
-  }
-}
-
-function vmToForm(vm: VirtualModel): VmFormValues {
-  return {
-    id: vm.id,
-    name: vm.name,
-    strategy: vm.strategy,
-    candidateSelection: vm.candidateSelection ?? [],
-  }
-}
-
-function parseVmForm(values: VmFormValues) {
-  if (!values.id.trim()) {
-    throw new Error('Virtual Model ID is required')
-  }
-  return {
-    id: values.id.trim(),
-    name: values.name.trim() || values.id.trim(),
-    strategy: values.strategy,
-    candidateSelection: values.candidateSelection,
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MCP Servers Panel

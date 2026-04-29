@@ -28,7 +28,7 @@ If Waypoi auth is enabled, send the matching bearer token.
 curl http://localhost:9469/v1/models
 ```
 
-Waypoi returns an OpenAI-style model list from healthy endpoints and smart pool aliases.
+Waypoi returns an OpenAI-style model list from healthy endpoints and smart virtual model aliases.
 Use `smart` as the default model for free-tier routing with automatic failover.
 
 ## 4) Optional: Responses API

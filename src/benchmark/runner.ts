@@ -17,6 +17,7 @@ import { classifyCapabilityStatus } from "./capabilityClassifier";
 import { computeConfigFingerprint, writeCapabilitySnapshots } from "./capabilityStore";
 import { resolveBenchmarkConfig } from "./config";
 import { evaluateGates } from "./gates";
+import { toNormalizedBenchmarkRunRequest } from "./request";
 import { validateScenarioCollection } from "./schema";
 import { builtInSuite, listSuiteExamples } from "./suites";
 import { listProviders } from "../providers/repository";
@@ -2201,6 +2202,7 @@ function buildReport(
     exampleId: effective.run.exampleId,
     scenarioPath,
     modelOverride: effective.run.modelOverride,
+    normalizedRequest: toNormalizedBenchmarkRunRequest(effective.run),
     configSource: effective.configSource,
     total,
     executed,
@@ -2217,6 +2219,7 @@ function buildReport(
     avgThroughputTokensPerSec: Number(avgThroughputTokensPerSec.toFixed(3)),
     modeSummary,
     effectiveConfig: {
+      run: effective.run,
       defaults: effective.defaults,
       profileSettings: effective.profileSettings,
       gates: effective.gates,

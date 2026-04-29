@@ -1,5 +1,5 @@
 import { routeRequest } from "../routing/router";
-import { selectPoolCandidates } from "../pools/scheduler";
+import { selectVirtualModelCandidates } from "../virtualModels/scheduler";
 import { pickBestProviderModelByCapabilities } from "../providers/modelRegistry";
 import { StoragePaths } from "../storage/files";
 import { VideoGenerationRequest } from "../types";
@@ -75,7 +75,7 @@ export async function runVideoGeneration(
 }
 
 async function pickDefaultVideoModel(paths: StoragePaths): Promise<string | null> {
-  const smart = await selectPoolCandidates(
+  const smart = await selectVirtualModelCandidates(
     paths,
     "smart",
     {

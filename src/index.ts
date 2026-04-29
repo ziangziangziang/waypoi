@@ -25,8 +25,8 @@ import { invalidateConfigCache } from "./storage/repositories";
 import { discoverAllTools, disconnectAllServers, summarizeMcpError, discoverBuiltinTools } from "./mcp/discovery";
 import { listProviders } from "./providers/repository";
 import { listModelsForApi } from "./providers/modelRegistry";
-import { listPools } from "./pools/repository";
-import { rebuildDefaultPools } from "./pools/builder";
+import { listVirtualModels } from "./virtualModels/repository";
+import { rebuildDefaultVirtualModels } from "./virtualModels/builder";
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -38,9 +38,9 @@ async function start(): Promise<void> {
   const paths = resolveStoragePaths();
   await ensureStorageDir(paths);
   try {
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
   } catch (error) {
-    console.error(`[waypoi] Failed to rebuild smart pool: ${(error as Error).message}`);
+    console.error(`[waypoi] Failed to rebuild smart virtual model: ${(error as Error).message}`);
     if (process.env.WAYPOI_DEBUG_ERRORS === "1") {
       console.error(error);
     }
@@ -109,7 +109,7 @@ async function start(): Promise<void> {
 
   try {
     const providers = await listProviders(paths);
-    const pools = await listPools(paths);
+    const virtualModels = await listVirtualModels(paths);
     const enabledProviders = providers.filter((provider) => provider.enabled).length;
     const byProtocol = providers.reduce<Record<string, number>>((acc, provider) => {
       const protocol = provider.protocolRaw ?? provider.protocol;
@@ -117,7 +117,7 @@ async function start(): Promise<void> {
       return acc;
     }, {});
     console.log(
-      `[waypoi] Providers: total=${providers.length}, enabled=${enabledProviders}, pools=${pools.length}`
+      `[waypoi] Providers: total=${providers.length}, enabled=${enabledProviders}, virtualModels=${virtualModels.length}`
     );
     console.log(`[waypoi] Provider protocols: ${JSON.stringify(byProtocol)}`);
   } catch (error) {

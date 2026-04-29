@@ -156,10 +156,12 @@ Waypoi is now provider-first. The recommended setup flow is:
 
 ## Free LLM Providers
 
-Waypoi includes a curated **Free LLM providers** catalog sourced from the local [`references/`](/Users/zziang/Documents/Projects/waypoi/references) registry. This catalog is used in two places:
+Waypoi includes a curated **Free LLM providers** catalog sourced from TypeScript sources in [`src/providers/catalog/`](/Users/zziang/Documents/Projects/waypoi/src/providers/catalog/). This catalog is used in two places:
 
 - the Settings UI `Catalog` tab when adding a provider
 - the CLI import path via `waypoi providers import -f .env`
+
+The catalog data is defined as TypeScript modules, one per provider, with verified rate limit metadata. A YAML-based fallback exists in the local [`references/`](/Users/zziang/Documents/Projects/waypoi/references) registry for backwards compatibility.
 
 The goal is to make free-tier providers easy to try without manually copying endpoints, auth types, or starter model metadata.
 
@@ -167,14 +169,16 @@ What the catalog includes:
 
 - provider presets for publicly documented free-tier LLM APIs
 - provider metadata such as docs links, auth shape, basic limits, and model counts
+- per-model rate limits where available (Groq, Cerebras), provider-level fallback otherwise
 - curated model metadata used for ranking and discovery
+- discovery configuration for dynamic model and rate limit probing
 
 How compatibility works:
 
-- `Ready now` means the provider can be added directly into Waypoi’s current provider framework
+- `Ready now` means the provider can be added directly into Waypoi's current provider framework
 - `Coming soon` means the provider is kept in the catalog, but its upstream protocol is not fully integrated into Waypoi yet
 
-Today, the best-supported free-provider flow is for providers that already fit Waypoi’s implemented protocols and discovery behavior, especially OpenAI-compatible ones. The catalog is still shown for broader free-tier coverage so users can see what is planned next.
+Today, the best-supported free-provider flow is for providers that already fit Waypoi's implemented protocols and discovery behavior, especially OpenAI-compatible ones. The catalog is still shown for broader free-tier coverage so users can see what is planned next.
 
 ### Current Support and Roadmap
 
@@ -182,12 +186,11 @@ Today, the best-supported free-provider flow is for providers that already fit W
 |---|---|---|
 | Cerebras | Supported now | OpenAI-compatible provider in the current framework |
 | GitHub Models | Supported now | Discovery uses provider-specific fallback behavior |
-| Groq | Supported now | OpenAI-compatible provider in the current framework |
+| Groq | Supported now | OpenAI-compatible provider with per-model rate limits and dynamic discovery |
 | HuggingFace | Supported now | OpenAI-compatible router/gateway integration |
 | Mistral | Supported now | OpenAI-compatible provider in the current framework |
 | NVIDIA NIM | Supported now | OpenAI-compatible provider with large discovered model catalog |
 | OpenRouter | Supported now | OpenAI-compatible gateway with large free-model catalog |
-| Vercel AI Gateway | Supported now | OpenAI-compatible gateway with provider-specific discovery handling |
 | Gemini | Supported now | Native `gemini` protocol using `/models` discovery and `generateContent` / `streamGenerateContent` chat routing |
 | Cloudflare Workers AI | Supported now | Native `cloudflare` protocol using account-scoped `/ai/v1` chat routing and `/ai/models/search` discovery |
 | Ollama Cloud | Supported now | Native `ollama` protocol using `/api/chat` routing and `/api/tags` discovery |
@@ -217,7 +220,7 @@ For model setup:
 
 Use the CLI with the provider-first workflow.
 
-For curated free providers from `references/`:
+For curated free providers (TypeScript-first catalog with verified rate limits):
 
 ```bash
 # Import the curated registry and load credentials from .env
@@ -226,6 +229,11 @@ waypoi providers import -f .env
 # Inspect imported providers
 waypoi providers
 waypoi providers show openrouter
+
+# Discover models dynamically from provider APIs
+waypoi providers discover groq
+waypoi providers discover groq --limits --model llama-3.3-70b-specDEC
+waypoi providers discover cerebras --api-key $CEREBRAS_API_KEY
 
 # Inspect provider models
 waypoi models openrouter
@@ -241,7 +249,7 @@ waypoi models add <providerId> --model-id <id> --upstream <provider-model-name> 
 waypoi models update <providerId> <modelRef> [patch options]
 ```
 
-Imported providers use the curated registry as metadata source. The UI catalog and the CLI import path both derive from the same `references/` dataset.
+Imported providers use the TypeScript catalog sources in `src/providers/catalog/` as the primary metadata source, with verified per-model rate limits. The legacy YAML-based `references/` registry remains as a fallback.
 
 Notes for free providers:
 
@@ -430,6 +438,8 @@ waypoi mcp disable <id|name>        # Disable server
 waypoi providers                    # List providers (canonical)
 waypoi providers import -f .env     # Import curated providers from references/ and load credentials
 waypoi providers show <providerId>  # Show one provider
+waypoi providers discover <providerId>           # Discover models from provider API
+waypoi providers discover <providerId> --limits   # Probe rate limit headers
 waypoi providers update <providerId> --insecure-tls|--strict-tls
 waypoi providers update <providerId> --auto-insecure-domain ai-application.stjude.org
 waypoi providers enable <providerId> # Enable provider
@@ -450,16 +460,18 @@ waypoi models set-key pcai/gpt-4o --api-key <key>|--env-var <ENV>
 
 # Benchmark showcase
 waypoi bench                               # Default live showcase example suite
-waypoi bench --list-examples               # List showcase examples
-waypoi bench --example showcase-tinyqa-001
-waypoi bench --suite showcase --model smart
-waypoi bench --scenario file.json          # File-driven scenarios
+waypoi bench --suite showcase --model smart --temperature 0
+waypoi bench --list-examples               # Advanced: list showcase examples
+waypoi bench --example showcase-tinyqa-001 # Advanced: narrow to one example
+waypoi bench --scenario file.json          # Advanced: file-driven scenarios
 waypoi bench --mode diagnostic --suite pool_smoke
 waypoi bench --baseline ./bench-prev.json
 ```
 
 Benchmark showcase examples are sourced from Hugging Face dataset
 `vincentkoc/tiny_qa_benchmark` (train split, 52 QA prompts).
+Admin/API benchmark runs prefer `{ "model": "...", "suite": "...", "parameters": { ... } }`;
+the older wide request shape remains available for advanced workflows.
 
 Provider credentials imported with `waypoi providers import -f .env` are stored in plaintext at
 `$WAYPOI_DIR/providers.json` by design for local operation.

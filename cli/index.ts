@@ -35,8 +35,8 @@ import {
   upsertProvider,
   upsertProviderModel,
 } from "../src/providers/repository";
-import { rebuildDefaultPools } from "../src/pools/builder";
-import { listPools } from "../src/pools/repository";
+import { rebuildDefaultVirtualModels } from "../src/virtualModels/builder";
+import { listVirtualModels } from "../src/virtualModels/repository";
 import { canonicalizeProtocol, hasProtocolAdapter, listAdapterOperations } from "../src/protocols/registry";
 import { ProviderModelRecord, ProviderProtocol, ProviderRecord } from "../src/providers/types";
 import { ModelCapabilities, ModelModality } from "../src/types";
@@ -772,7 +772,7 @@ const provider = program
   .command("providers")
   .alias("provider")
   .alias("prov")
-  .description("Manage provider catalog and smart pools")
+  .description("Manage provider catalog and virtual models")
   .action(async () => {
     await listProvidersAction();
   });
@@ -798,7 +798,7 @@ provider
   )
   .option("-f, --env-file <path>", "Path to .env file", ".env")
   .option("--overwrite-auth", "Overwrite stored provider keys with env values")
-  .option("--no-rebuild-pools", "Skip automatic smart pool rebuild")
+  .option("--no-rebuild-virtual-models", "Skip automatic virtual model rebuild")
   .action(async (options) => {
     await ensureStorageDir(paths);
     try {
@@ -808,14 +808,14 @@ provider
         overwriteAuth: Boolean(options.overwriteAuth),
       });
       let rebuilt = 0;
-      if (options.rebuildPools !== false) {
-        const pools = await rebuildDefaultPools(paths);
-        rebuilt = pools.length;
+      if (options.rebuildVirtualModels !== false) {
+        const virtualModels = await rebuildDefaultVirtualModels(paths);
+        rebuilt = virtualModels.length;
       }
       console.log(`Imported providers: ${result.importedProviders}`);
       console.log(`Imported models: ${result.importedModels}`);
       if (rebuilt > 0) {
-        console.log(`Rebuilt pools: ${rebuilt}`);
+        console.log(`Rebuilt virtual models: ${rebuilt}`);
       }
       if (result.warnings.length > 0) {
         console.log("Warnings:");
@@ -874,7 +874,7 @@ provider
   .option("--strict-tls", "Set provider default TLS mode to strict")
   .option("--auto-insecure-domain <suffix...>", "Set auto-insecure TLS allowlist domains")
   .option("--clear-auto-insecure-domains", "Clear auto-insecure TLS allowlist")
-  .option("--no-rebuild", "Skip automatic smart pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, options) => {
     await ensureStorageDir(paths);
     if (options.insecureTls && options.strictTls) {
@@ -908,7 +908,7 @@ provider
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Updated provider: ${updated.id}`);
   });
@@ -953,6 +953,96 @@ provider
         livebench: model.benchmark?.livebench ?? "-",
       }))
     );
+  });
+
+provider
+  .command("discover")
+  .description("Discover models and rate limits from provider APIs")
+  .argument("<providerId>", "Provider ID to discover")
+  .option("--api-key <key>", "API key for the provider")
+  .option("--model <modelId>", "Specific model to probe for rate limits")
+  .option("--models", "Discover available models", false)
+  .option("--limits", "Probe rate limit headers", false)
+  .option("--json", "Output as JSON")
+  .action(async (providerId, options) => {
+    await ensureStorageDir(paths);
+
+    const {
+      discoverProviderModels,
+      discoverProviderRateLimits,
+    } = await import("../src/providers/discover");
+
+    let action = "models";
+    if (options.limits) {
+      action = "limits";
+    }
+
+    if (action === "models") {
+      const result = await discoverProviderModels(providerId, {
+        apiKey: options.apiKey,
+      });
+
+      if (options.json) {
+        printJson(result);
+        return;
+      }
+
+      if (result.error) {
+        console.error(`Error: ${result.error}`);
+        process.exitCode = 1;
+        return;
+      }
+
+      console.log(
+        `Discovered ${result.models.length} models from ${result.providerName}`
+      );
+      console.table(
+        result.models.map((m) => ({
+          id: m.id,
+          name: m.name,
+        }))
+      );
+    } else {
+      const result = await discoverProviderRateLimits(providerId, {
+        apiKey: options.apiKey,
+        modelId: options.model,
+      });
+
+      if (options.json) {
+        printJson(result);
+        return;
+      }
+
+      if (result.error) {
+        console.error(`Error: ${result.error}`);
+        process.exitCode = 1;
+        return;
+      }
+
+      if (result.rateLimits) {
+        for (const [model, limits] of Object.entries(result.rateLimits)) {
+          console.log(`\nRate limits for ${model}:`);
+          if (limits.requests) {
+            if (limits.requests.perMinute) {
+              console.log(`  RPM: ${limits.requests.perMinute}`);
+            }
+            if (limits.requests.perDay) {
+              console.log(`  RPD: ${limits.requests.perDay}`);
+            }
+          }
+          if (limits.tokens) {
+            if (limits.tokens.perMinute) {
+              console.log(`  TPM: ${limits.tokens.perMinute}`);
+            }
+            if (limits.tokens.perDay) {
+              console.log(`  TPB: ${limits.tokens.perDay}`);
+            }
+          }
+        }
+      } else {
+        console.log("No rate limit headers found in response.");
+      }
+    }
   });
 
 const providerModel = provider
@@ -1060,7 +1150,7 @@ providerModel
   .option("--free", "Mark model as free")
   .option("--no-free", "Mark model as not free")
   .option("--disabled", "Add model in disabled state")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, options) => {
     await ensureStorageDir(paths);
     const providerRecord = await getProviderById(paths, providerId);
@@ -1098,7 +1188,7 @@ providerModel
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Model ${result.created ? "added" : "updated"}: ${providerModelId}`);
   });
@@ -1122,7 +1212,7 @@ providerModel
   .option("--not-free", "Set free=false")
   .option("--enabled", "Set enabled=true")
   .option("--disabled", "Set enabled=false")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, modelRef, options) => {
     await ensureStorageDir(paths);
     const patch: Partial<ProviderModelRecord> = {};
@@ -1183,7 +1273,7 @@ providerModel
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Updated model: ${updated.providerModelId}`);
   });
@@ -1193,7 +1283,7 @@ providerModel
   .description("Remove a provider model")
   .argument("<providerId>")
   .argument("<modelRef>")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, modelRef, options) => {
     await ensureStorageDir(paths);
     const removed = await deleteProviderModel(paths, providerId, modelRef);
@@ -1203,7 +1293,7 @@ providerModel
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Removed model: ${removed.providerModelId}`);
   });
@@ -1213,7 +1303,7 @@ providerModel
   .description("Enable a provider model")
   .argument("<providerId>")
   .argument("<modelRef>")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, modelRef, options) => {
     await ensureStorageDir(paths);
     const model = await setProviderModelEnabled(paths, providerId, modelRef, true);
@@ -1223,7 +1313,7 @@ providerModel
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Enabled model: ${model.providerModelId}`);
   });
@@ -1233,7 +1323,7 @@ providerModel
   .description("Disable a provider model")
   .argument("<providerId>")
   .argument("<modelRef>")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, modelRef, options) => {
     await ensureStorageDir(paths);
     const model = await setProviderModelEnabled(paths, providerId, modelRef, false);
@@ -1243,7 +1333,7 @@ providerModel
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Disabled model: ${model.providerModelId}`);
   });
@@ -1255,7 +1345,7 @@ providerModel
   .argument("<modelRef>")
   .option("--api-key <key>", "API key value")
   .option("--env-var <name>", "Read API key from environment variable")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, modelRef, options) => {
     await ensureStorageDir(paths);
     let apiKey: string | undefined = options.apiKey;
@@ -1279,7 +1369,7 @@ providerModel
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Updated key for model: ${model.providerModelId}`);
   });
@@ -1296,7 +1386,7 @@ provider
       process.exitCode = 1;
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     console.log(`Enabled provider: ${updated.id}`);
   });
 
@@ -1312,7 +1402,7 @@ provider
       process.exitCode = 1;
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     console.log(`Disabled provider: ${updated.id}`);
   });
 
@@ -1459,7 +1549,7 @@ provider
       }
     }
 
-    const pools = await rebuildDefaultPools(paths);
+    const virtualModels = await rebuildDefaultVirtualModels(paths);
     const reportPath = writeMigrationReport(paths.baseDir, {
       timestamp: now,
       providerId,
@@ -1478,7 +1568,7 @@ provider
     console.log(`Matched endpoints: ${matchedEndpoints.length}`);
     console.log(`Migrated models: ${migratedModels} (created ${createdModels}, updated ${updatedModels})`);
     console.log(`Disabled source endpoints: ${disabledEndpoints}`);
-    console.log(`Rebuilt pools: ${pools.length}`);
+    console.log(`Rebuilt virtual models: ${virtualModels.length}`);
     console.log(`Migration report: ${reportPath}`);
 
     if (warnings.length > 0) {
@@ -1493,26 +1583,26 @@ provider
   });
 
 provider
-  .command("pools")
-  .description("List smart pools")
+  .command("virtual-models")
+  .description("List virtual models")
   .option("--json", "Output as JSON")
   .action(async (options) => {
     await ensureStorageDir(paths);
-    const pools = await listPools(paths);
+    const virtualModels = await listVirtualModels(paths);
     if (options.json) {
-      console.log(JSON.stringify(pools, null, 2));
+      console.log(JSON.stringify(virtualModels, null, 2));
       return;
     }
-    if (pools.length === 0) {
-      console.log("No pools found.");
+    if (virtualModels.length === 0) {
+      console.log("No virtual models found.");
       return;
     }
     console.table(
-      pools.map((pool) => ({
-        id: pool.id,
-        aliases: pool.aliases.join(","),
-        candidates: pool.candidates.length,
-        strategy: pool.strategy,
+      virtualModels.map((virtualModel) => ({
+        id: virtualModel.id,
+        aliases: virtualModel.aliases.join(","),
+        candidates: virtualModel.candidates.length,
+        strategy: virtualModel.strategy,
       }))
     );
   });
@@ -1761,7 +1851,7 @@ models
   .command("enable")
   .description("Enable a provider model")
   .argument("<modelRef>")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (modelRef, options) => {
     await ensureStorageDir(paths);
     const resolved = await resolveModelTarget(modelRef);
@@ -1775,7 +1865,7 @@ models
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Enabled model: ${model.providerModelId}`);
   });
@@ -1784,7 +1874,7 @@ models
   .command("disable")
   .description("Disable a provider model")
   .argument("<modelRef>")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (modelRef, options) => {
     await ensureStorageDir(paths);
     const resolved = await resolveModelTarget(modelRef);
@@ -1798,7 +1888,7 @@ models
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Disabled model: ${model.providerModelId}`);
   });
@@ -1809,7 +1899,7 @@ models
   .argument("<modelRef>")
   .option("--api-key <key>", "API key value")
   .option("--env-var <name>", "Read API key from environment variable")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (modelRef, options) => {
     await ensureStorageDir(paths);
     const resolved = await resolveModelTarget(modelRef);
@@ -1841,7 +1931,7 @@ models
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Updated key for model: ${model.providerModelId}`);
   });
@@ -1861,7 +1951,7 @@ models
   .option("--free", "Mark model as free")
   .option("--no-free", "Mark model as not free")
   .option("--disabled", "Add model in disabled state")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, options) => {
     await ensureStorageDir(paths);
     const providerRecord = await getProviderById(paths, providerId);
@@ -1898,7 +1988,7 @@ models
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Model ${result.created ? "added" : "updated"}: ${providerModelId}`);
   });
@@ -1922,7 +2012,7 @@ models
   .option("--not-free", "Set free=false")
   .option("--enabled", "Set enabled=true")
   .option("--disabled", "Set enabled=false")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, modelRef, options) => {
     await ensureStorageDir(paths);
     const patch: Partial<ProviderModelRecord> = {};
@@ -1986,7 +2076,7 @@ models
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Updated model: ${updated.providerModelId}`);
   });
@@ -1996,7 +2086,7 @@ models
   .description("Remove a provider model")
   .argument("<providerId>")
   .argument("<modelRef>")
-  .option("--no-rebuild", "Skip automatic pool rebuild")
+  .option("--no-rebuild", "Skip automatic virtual model rebuild")
   .action(async (providerId, modelRef, options) => {
     await ensureStorageDir(paths);
     const removed = await deleteProviderModel(paths, providerId, modelRef);
@@ -2008,7 +2098,7 @@ models
       return;
     }
     if (options.rebuild !== false) {
-      await rebuildDefaultPools(paths);
+      await rebuildDefaultVirtualModels(paths);
     }
     console.log(`Removed model: ${removed.providerModelId}`);
   });

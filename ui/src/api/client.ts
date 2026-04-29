@@ -350,7 +350,7 @@ export interface Model {
     consecutiveFailures?: number;
     latencyMsEwma?: number;
   };
-  waypoi_pool?: {
+  waypoi_virtual_model?: {
     id: string;
     strategy: string;
     candidateCount: number;
@@ -1102,6 +1102,7 @@ export interface BenchmarkReport {
   exampleId?: string
   scenarioPath?: string
   modelOverride?: string
+  normalizedRequest?: BenchmarkRunStartPayload
   total: number
   executed: number
   skipped: number
@@ -1138,9 +1139,44 @@ export interface BenchmarkReport {
   warnings: string[]
 }
 
+export type BenchmarkGenerationParameters = {
+  temperature?: number
+  top_p?: number
+  max_tokens?: number
+  presence_penalty?: number
+  frequency_penalty?: number
+  seed?: number
+  stop?: string | string[]
+}
+
+export type BenchmarkRunStartPayload = {
+  model?: string
+  suite: string
+  parameters?: BenchmarkGenerationParameters
+  exampleId?: string
+  scenarioPath?: string
+  modelOverride?: string
+  outPath?: string
+  configPath?: string
+  profile?: string
+  baselinePath?: string
+  executionMode?: 'showcase' | 'diagnostic'
+  updateCapCache?: boolean
+  capTtlDays?: number
+  temperature?: number
+  top_p?: number
+  max_tokens?: number
+  presence_penalty?: number
+  frequency_penalty?: number
+  seed?: number
+  stop?: string | string[]
+}
+
 export interface BenchmarkRunRecord extends BenchmarkRunSummary {
   request?: {
     suite?: string;
+    model?: string;
+    parameters?: BenchmarkGenerationParameters;
     exampleId?: string;
     scenarioPath?: string;
     modelOverride?: string;
@@ -1173,25 +1209,7 @@ export interface BenchmarkRunRecord extends BenchmarkRunSummary {
   error?: string;
 }
 
-export async function startBenchmarkRun(payload: {
-  suite?: string;
-  exampleId?: string;
-  scenarioPath?: string;
-  modelOverride?: string;
-  configPath?: string;
-  profile?: string;
-  baselinePath?: string;
-  executionMode?: 'showcase' | 'diagnostic';
-  updateCapCache?: boolean;
-  capTtlDays?: number;
-  temperature?: number;
-  top_p?: number;
-  max_tokens?: number;
-  presence_penalty?: number;
-  frequency_penalty?: number;
-  seed?: number;
-  stop?: string | string[];
-}): Promise<BenchmarkRunRecord> {
+export async function startBenchmarkRun(payload: BenchmarkRunStartPayload): Promise<BenchmarkRunRecord> {
   const response = await fetch(`${API_BASE}/admin/benchmarks/runs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1355,7 +1373,7 @@ export async function executeMcpTool(
 }
 
 // ========================================
-// Virtual Models (Pools) API
+// Virtual Models API
 // ========================================
 
 export interface VirtualModel {
@@ -1370,9 +1388,22 @@ export interface VirtualModel {
   candidates: Array<{
     id: string;
     providerId: string;
+    providerName?: string;
     modelId: string;
+    endpointType?: EndpointType;
+    free?: boolean;
     score: number;
     scoreSource: string;
+    limits?: {
+      requestsPerMinute?: number;
+      requestsPerHour?: number;
+      requestsPerDay?: number;
+      requestsPerWeek?: number;
+      tokensPerMinute?: number;
+      tokensPerHour?: number;
+      tokensPerDay?: number;
+      tokensPerWeek?: number;
+    };
   }>;
   candidateSelection: string[];
   userDefined: boolean;
@@ -1380,7 +1411,7 @@ export interface VirtualModel {
 }
 
 export async function listVirtualModels(): Promise<VirtualModel[]> {
-  const response = await fetch(`${API_BASE}/admin/pools`);
+  const response = await fetch(`${API_BASE}/admin/virtual-models`);
   return handleResponse<VirtualModel[]>(response);
 }
 
@@ -1391,7 +1422,7 @@ export async function createVirtualModel(payload: {
   strategy?: 'highest_rank_available' | 'remaining_limit';
   candidateSelection?: string[];
 }): Promise<VirtualModel> {
-  const response = await fetch(`${API_BASE}/admin/pools`, {
+  const response = await fetch(`${API_BASE}/admin/virtual-models`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -1403,7 +1434,7 @@ export async function updateVirtualModel(
   id: string,
   payload: Partial<VirtualModel>
 ): Promise<VirtualModel> {
-  const response = await fetch(`${API_BASE}/admin/pools/${encodeURIComponent(id)}`, {
+  const response = await fetch(`${API_BASE}/admin/virtual-models/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -1412,17 +1443,32 @@ export async function updateVirtualModel(
 }
 
 export async function deleteVirtualModel(id: string): Promise<{ deleted: string }> {
-  const response = await fetch(`${API_BASE}/admin/pools/${encodeURIComponent(id)}`, {
+  const response = await fetch(`${API_BASE}/admin/virtual-models/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
   return handleResponse<{ deleted: string }>(response);
 }
 
 export async function toggleVirtualModel(id: string): Promise<VirtualModel> {
-  const response = await fetch(`${API_BASE}/admin/pools/${encodeURIComponent(id)}/toggle`, {
+  const response = await fetch(`${API_BASE}/admin/virtual-models/${encodeURIComponent(id)}/toggle`, {
     method: 'POST',
   });
   return handleResponse<VirtualModel>(response);
+}
+
+export interface VirtualModelSwitchEvent {
+  id: string;
+  virtualModelId: string;
+  fromCandidateId?: string;
+  toCandidateId?: string;
+  reason: string;
+  requestId?: string;
+  createdAt: string;
+}
+
+export async function listVirtualModelEvents(id: string, window: string = '7d'): Promise<{ object: 'list'; data: VirtualModelSwitchEvent[] }> {
+  const response = await fetch(`${API_BASE}/admin/virtual-models/${encodeURIComponent(id)}/events?window=${encodeURIComponent(window)}`);
+  return handleResponse<{ object: 'list'; data: VirtualModelSwitchEvent[] }>(response);
 }
 
 // ========================================

@@ -7,3 +7,4 @@ ui/dist
 .vscode/
 .github/agents
 references/
+.playwright-mcp

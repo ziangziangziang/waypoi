@@ -1,5 +1,5 @@
-import { getPoolByAlias, listPools } from "../pools/repository";
-import { PoolCandidate } from "../pools/types";
+import { getVirtualModelByAlias, listVirtualModels } from "../virtualModels/repository";
+import { VirtualModelCandidate } from "../virtualModels/types";
 import { getProtocolAdapter } from "../protocols/registry";
 import { ProtocolOperation } from "../protocols/types";
 import { StoragePaths } from "../storage/files";
@@ -8,6 +8,7 @@ import { supportsRequirements } from "../utils/modelCapabilities";
 import { canonicalProviderModelId, getEffectiveModelInsecureTls, listProviders } from "./repository";
 import { getProviderModelHealthMap } from "./health";
 import { ProviderModelRecord, ProviderRecord } from "./types";
+import { scoreModelHeuristic } from "../virtualModels/builder";
 
 const SCORE_FALLBACK = 20;
 const SMART_ALIAS = "smart";
@@ -40,14 +41,14 @@ type CandidateRequirements = {
 };
 
 export type ResolveModelResult =
-  | { kind: "pool"; alias: string }
+  | { kind: "virtual_model"; alias: string }
   | {
       kind: "direct";
       canonicalId: string;
-      candidates: PoolCandidate[];
+      candidates: VirtualModelCandidate[];
       unsupportedReason?: "unsupported_operation" | "stream_unsupported";
     }
-  | { kind: "deprecated_pool_alias"; input: string; replacement: typeof SMART_ALIAS }
+  | { kind: "deprecated_virtual_model_alias"; input: string; replacement: typeof SMART_ALIAS }
   | { kind: "ambiguous"; input: string; matches: string[] }
   | { kind: "none"; input: string };
 
@@ -58,7 +59,7 @@ interface FlattenedProviderModel {
 }
 
 interface CandidateBuildResult {
-  candidates: PoolCandidate[];
+  candidates: VirtualModelCandidate[];
   unsupportedReason?: "unsupported_operation" | "stream_unsupported";
 }
 
@@ -109,9 +110,9 @@ export async function resolveModel(
   requirements: CandidateRequirements,
   routing?: { operation: ProtocolOperation; stream: boolean }
 ): Promise<ResolveModelResult> {
-  const pool = await getPoolByAlias(paths, inputId);
-  if (pool) {
-    return { kind: "pool", alias: inputId };
+  const virtualModel = await getVirtualModelByAlias(paths, inputId);
+  if (virtualModel) {
+    return { kind: "virtual_model", alias: inputId };
   }
 
   const models = await flattenProviderModels(paths);
@@ -217,18 +218,19 @@ export async function listModelAliases(paths: StoragePaths): Promise<string[]> {
       }
     }
   }
-  const pools = await listPools(paths);
-  for (const pool of pools) {
-    for (const alias of pool.aliases) {
-      if (alias === SMART_ALIAS) {
-        aliases.add(alias);
-      }
+  const virtualModels = await listVirtualModels(paths);
+  for (const virtualModel of virtualModels) {
+    if (!virtualModel.enabled) {
+      continue;
+    }
+    for (const alias of virtualModel.aliases) {
+      aliases.add(alias);
     }
   }
   return Array.from(aliases).sort();
 }
 
-export interface SmartPoolAvailability {
+export interface VirtualModelAvailability {
   id: string;
   alias: string;
   strategy: "highest_rank_available" | "remaining_limit";
@@ -236,43 +238,50 @@ export interface SmartPoolAvailability {
   capabilities: ModelCapabilities;
 }
 
-export async function getAvailableSmartPool(paths: StoragePaths): Promise<SmartPoolAvailability | null> {
-  const pool = await getPoolByAlias(paths, SMART_ALIAS);
-  if (!pool) {
-    return null;
-  }
-
+export async function getAvailableVirtualModels(paths: StoragePaths): Promise<VirtualModelAvailability[]> {
+  const virtualModels = await listVirtualModels(paths);
   const healthMap = await getProviderModelHealthMap(paths);
-  const candidates = pool.candidates.filter((candidate) => {
-    if (!candidate.providerEnabled || !candidate.modelEnabled || !candidate.supportsRouting) {
-      return false;
+  const available: VirtualModelAvailability[] = [];
+
+  for (const virtualModel of virtualModels) {
+    if (!virtualModel.enabled) {
+      continue;
     }
-    if (!candidate.baseUrl) {
-      return false;
-    }
-    if (!getProtocolAdapter(candidate.protocol)) {
-      return false;
-    }
-    if (candidate.providerModelId) {
-      const health = healthMap[candidate.providerModelId];
-      if (health?.status === "down") {
+    const candidates = virtualModel.candidates.filter((candidate) => {
+      if (!candidate.providerEnabled || !candidate.modelEnabled || !candidate.supportsRouting) {
         return false;
       }
+      if (!candidate.baseUrl) {
+        return false;
+      }
+      if (!getProtocolAdapter(candidate.protocol)) {
+        return false;
+      }
+      if (candidate.providerModelId) {
+        const health = healthMap[candidate.providerModelId];
+        if (health?.status === "down") {
+          return false;
+        }
+      }
+      return true;
+    });
+    if (candidates.length === 0) {
+      continue;
     }
-    return true;
-  });
-
-  if (candidates.length === 0) {
-    return null;
+    available.push({
+      id: virtualModel.id,
+      alias: virtualModel.aliases[0] ?? virtualModel.id,
+      strategy: virtualModel.strategy,
+      candidateCount: candidates.length,
+      capabilities: unionCapabilities(candidates),
+    });
   }
+  return available.sort((a, b) => a.alias.localeCompare(b.alias));
+}
 
-  return {
-    id: pool.id,
-    alias: SMART_ALIAS,
-    strategy: pool.strategy,
-    candidateCount: candidates.length,
-    capabilities: unionCapabilities(candidates),
-  };
+export async function getAvailableSmartVirtualModel(paths: StoragePaths): Promise<VirtualModelAvailability | null> {
+  const models = await getAvailableVirtualModels(paths);
+  return models.find((model) => model.alias === SMART_ALIAS || model.id === SMART_ALIAS) ?? null;
 }
 
 async function flattenProviderModels(paths: StoragePaths): Promise<FlattenedProviderModel[]> {
@@ -297,7 +306,7 @@ async function buildAndFilterCandidates(
   routing?: { operation: ProtocolOperation; stream: boolean },
   healthMap?: Record<string, { status?: "up" | "down" }>
 ): Promise<CandidateBuildResult> {
-  const accepted: PoolCandidate[] = [];
+  const accepted: VirtualModelCandidate[] = [];
   const modelHealth = healthMap ?? (await getProviderModelHealthMap(paths));
   let sawUnsupportedOperation = false;
   let sawStreamUnsupported = false;
@@ -363,7 +372,7 @@ function shouldRespectHealthStatus(protocol: string): boolean {
   return protocol !== "dashscope";
 }
 
-function buildCandidate(provider: ProviderRecord, model: ProviderModelRecord): PoolCandidate {
+function buildCandidate(provider: ProviderRecord, model: ProviderModelRecord): VirtualModelCandidate {
   const score = model.benchmark?.livebench;
   const baseUrl = model.baseUrl ?? provider.baseUrl;
   return {
@@ -387,8 +396,8 @@ function buildCandidate(provider: ProviderRecord, model: ProviderModelRecord): P
     free: model.free,
     endpointType: model.endpointType,
     capabilities: model.capabilities,
-    score: typeof score === "number" ? score : SCORE_FALLBACK,
-    scoreSource: typeof score === "number" ? "benchmark.livebench" : "fallback",
+    score: typeof score === "number" ? score : scoreModelHeuristic(`${provider.id}/${model.modelId}`, model.capabilities),
+    scoreSource: typeof score === "number" ? "benchmark.livebench" : "heuristic",
     limits: {
       requestsPerMinute: model.limits?.requests?.perMinute ?? provider.limits?.requests?.perMinute,
       requestsPerHour: model.limits?.requests?.perHour ?? provider.limits?.requests?.perHour,
@@ -402,7 +411,7 @@ function buildCandidate(provider: ProviderRecord, model: ProviderModelRecord): P
   };
 }
 
-function unionCapabilities(candidates: PoolCandidate[]): ModelCapabilities {
+function unionCapabilities(candidates: VirtualModelCandidate[]): ModelCapabilities {
   const input = new Set<ModelModality>();
   const output = new Set<ModelModality>();
   let supportsTools = false;

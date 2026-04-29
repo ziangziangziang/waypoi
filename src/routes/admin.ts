@@ -5,7 +5,7 @@ import {
   getProviderCatalogEntry,
   listProviderCatalog,
   matchCatalogModel,
-} from "../providers/catalog";
+} from "../providers/registry";
 import {
   deleteProvider,
   deleteProviderModel,
@@ -21,11 +21,12 @@ import {
   upsertProviderModel,
 } from "../providers/repository";
 import { ProviderCatalogEntry, ProviderModelRecord, ProviderRecord } from "../providers/types";
-import { listPools, savePools } from "../pools/repository";
-import { PoolDefinition } from "../pools/types";
-import { rebuildDefaultPools } from "../pools/builder";
+import { listVirtualModelSwitchEvents, listVirtualModels, saveVirtualModels } from "../virtualModels/repository";
+import { VirtualModelDefinition } from "../virtualModels/types";
+import { rebuildDefaultVirtualModels } from "../virtualModels/builder";
 import { BenchmarkCliOptions } from "../benchmark/types";
 import { listBenchmarkExamples } from "../benchmark/runner";
+import { normalizeBenchmarkRunRequest } from "../benchmark/request";
 import {
   getArtifactBenchmarkRun,
   getBenchmarkRun,
@@ -179,7 +180,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       importedAt: new Date().toISOString(),
     };
     const saved = await upsertProvider(paths, provider);
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.code(201).send(saved);
   });
 
@@ -195,7 +196,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       reply.code(404).send({ error: { message: "provider not found" } });
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.send(updated);
   });
 
@@ -206,7 +207,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       reply.code(404).send({ error: { message: "provider not found" } });
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.send({ deleted: removed.id });
   });
 
@@ -217,7 +218,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       reply.code(404).send({ error: { message: "provider not found" } });
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.send(provider);
   });
 
@@ -228,7 +229,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       reply.code(404).send({ error: { message: "provider not found" } });
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.send(provider);
   });
 
@@ -329,7 +330,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       reply.code(500).send({ error: { message: "failed to add model" } });
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.code(result.created ? 201 : 200).send(record);
   });
 
@@ -345,7 +346,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       reply.code(404).send({ error: { message: "model not found" } });
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.send(updated);
   });
 
@@ -356,7 +357,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       reply.code(404).send({ error: { message: "model not found" } });
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.send({ deleted: removed.providerModelId });
   });
 
@@ -367,7 +368,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       reply.code(404).send({ error: { message: "model not found" } });
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.send(model);
   });
 
@@ -378,34 +379,38 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
       reply.code(404).send({ error: { message: "model not found" } });
       return;
     }
-    await rebuildDefaultPools(paths);
+    await rebuildDefaultVirtualModels(paths);
     reply.send(model);
   });
 
-  app.get("/admin/pools", async (_req, reply) => {
-    const pools = await listPools(paths);
-    reply.send(pools);
+  app.get("/admin/virtual-models", async (_req, reply) => {
+    const virtualModels = await listVirtualModels(paths);
+    reply.send(virtualModels);
   });
 
   app.post(
-    "/admin/pools",
-    async (req: FastifyRequest<{ Body: Partial<PoolDefinition> }>, reply: FastifyReply) => {
+    "/admin/virtual-models",
+    async (req: FastifyRequest<{ Body: Partial<VirtualModelDefinition> }>, reply: FastifyReply) => {
       const body = req.body ?? {};
       if (!body.id?.trim()) {
-        reply.code(400).send({ error: { message: "Pool ID is required" } });
+        reply.code(400).send({ error: { message: "Virtual model ID is required" } });
         return;
       }
-      const existing = await listPools(paths);
+      if (!/^[A-Za-z0-9._:-]+$/.test(body.id.trim())) {
+        reply.code(400).send({ error: { message: "Virtual model ID may only contain letters, numbers, '.', '_', ':', and '-'" } });
+        return;
+      }
+      const existing = await listVirtualModels(paths);
       if (existing.some((p) => p.id === body.id)) {
-        reply.code(409).send({ error: { message: "A pool with this ID already exists" } });
+        reply.code(409).send({ error: { message: "A virtual model with this ID already exists" } });
         return;
       }
-      const pool: PoolDefinition = {
+      const virtualModel: VirtualModelDefinition = {
         id: body.id.trim(),
         name: body.name?.trim() || body.id.trim(),
         aliases: body.aliases ?? [body.id.trim()],
         enabled: body.enabled !== false,
-        strategy: (body.strategy as PoolDefinition["strategy"]) ?? "highest_rank_available",
+        strategy: (body.strategy as VirtualModelDefinition["strategy"]) ?? "highest_rank_available",
         requiredInput: body.requiredInput ?? [],
         requiredOutput: body.requiredOutput ?? [],
         scoreFallback: typeof body.scoreFallback === "number" ? body.scoreFallback : 20,
@@ -414,79 +419,91 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
         userDefined: true,
         updatedAt: new Date().toISOString(),
       };
-      existing.push(pool);
-      await savePools(paths, existing);
-      reply.code(201).send(pool);
+      existing.push(virtualModel);
+      await saveVirtualModels(paths, existing);
+      const rebuilt = await rebuildDefaultVirtualModels(paths);
+      reply.code(201).send(rebuilt.find((model) => model.id === virtualModel.id) ?? virtualModel);
     }
   );
 
   app.put(
-    "/admin/pools/:id",
-    async (req: FastifyRequest<{ Params: { id: string }; Body: Partial<PoolDefinition> }>, reply: FastifyReply) => {
+    "/admin/virtual-models/:id",
+    async (req: FastifyRequest<{ Params: { id: string }; Body: Partial<VirtualModelDefinition> }>, reply: FastifyReply) => {
       const { id } = req.params;
       const body = req.body ?? {};
-      const pools = await listPools(paths);
-      const idx = pools.findIndex((p) => p.id === id);
+      const virtualModels = await listVirtualModels(paths);
+      const idx = virtualModels.findIndex((p) => p.id === id);
       if (idx === -1) {
-        reply.code(404).send({ error: { message: "Pool not found" } });
+        reply.code(404).send({ error: { message: "Virtual model not found" } });
         return;
       }
-      const existing = pools[idx];
+      const existing = virtualModels[idx];
       if (!existing.userDefined) {
-        reply.code(403).send({ error: { message: "Cannot modify auto-generated pools" } });
+        reply.code(403).send({ error: { message: "Cannot modify built-in virtual models" } });
         return;
       }
-      pools[idx] = {
+      virtualModels[idx] = {
         ...existing,
         name: body.name !== undefined ? body.name.trim() : existing.name,
         aliases: body.aliases ?? existing.aliases,
         enabled: body.enabled !== undefined ? body.enabled : existing.enabled,
-        strategy: (body.strategy as PoolDefinition["strategy"]) ?? existing.strategy,
+        strategy: (body.strategy as VirtualModelDefinition["strategy"]) ?? existing.strategy,
         requiredInput: body.requiredInput ?? existing.requiredInput,
         requiredOutput: body.requiredOutput ?? existing.requiredOutput,
         scoreFallback: typeof body.scoreFallback === "number" ? body.scoreFallback : existing.scoreFallback,
         candidateSelection: body.candidateSelection ?? existing.candidateSelection,
         updatedAt: new Date().toISOString(),
       };
-      await savePools(paths, pools);
-      reply.send(pools[idx]);
+      await saveVirtualModels(paths, virtualModels);
+      const rebuilt = await rebuildDefaultVirtualModels(paths);
+      reply.send(rebuilt.find((model) => model.id === id) ?? virtualModels[idx]);
     }
   );
 
-  app.delete("/admin/pools/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  app.delete("/admin/virtual-models/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = req.params;
-    const pools = await listPools(paths);
-    const idx = pools.findIndex((p) => p.id === id);
+    const virtualModels = await listVirtualModels(paths);
+    const idx = virtualModels.findIndex((p) => p.id === id);
     if (idx === -1) {
-      reply.code(404).send({ error: { message: "Pool not found" } });
+      reply.code(404).send({ error: { message: "Virtual model not found" } });
       return;
     }
-    if (!pools[idx].userDefined) {
-      reply.code(403).send({ error: { message: "Cannot delete auto-generated pools" } });
+    if (!virtualModels[idx].userDefined) {
+      reply.code(403).send({ error: { message: "Cannot delete built-in virtual models" } });
       return;
     }
-    pools.splice(idx, 1);
-    await savePools(paths, pools);
+    virtualModels.splice(idx, 1);
+    await saveVirtualModels(paths, virtualModels);
     reply.send({ deleted: id });
   });
 
-  app.post("/admin/pools/:id/toggle", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  app.post("/admin/virtual-models/:id/toggle", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = req.params;
-    const pools = await listPools(paths);
-    const pool = pools.find((p) => p.id === id);
-    if (!pool) {
-      reply.code(404).send({ error: { message: "Pool not found" } });
+    const virtualModels = await listVirtualModels(paths);
+    const virtualModel = virtualModels.find((p) => p.id === id);
+    if (!virtualModel) {
+      reply.code(404).send({ error: { message: "Virtual model not found" } });
       return;
     }
-    pool.enabled = !pool.enabled;
-    pool.updatedAt = new Date().toISOString();
-    await savePools(paths, pools);
-    reply.send(pool);
+    virtualModel.enabled = !virtualModel.enabled;
+    virtualModel.updatedAt = new Date().toISOString();
+    await saveVirtualModels(paths, virtualModels);
+    reply.send(virtualModel);
   });
 
-  app.post("/admin/pools/rebuild", async (_req, reply) => {
-    const pools = await rebuildDefaultPools(paths);
-    reply.send({ rebuilt: pools.length, pools });
+  app.post("/admin/virtual-models/rebuild", async (_req, reply) => {
+    const virtualModels = await rebuildDefaultVirtualModels(paths);
+    reply.send({ rebuilt: virtualModels.length, virtualModels });
+  });
+
+  app.get("/admin/virtual-models/:id/events", async (req: FastifyRequest<{ Params: { id: string }; Querystring: { window?: string } }>, reply) => {
+    const windowMs = parseEventWindow(req.query.window ?? "7d");
+    if (windowMs === null) {
+      reply.code(400).send({ error: { message: "Invalid window format. Use e.g. 1h or 7d" } });
+      return;
+    }
+    const events = await listVirtualModelSwitchEvents(paths, req.params.id, windowMs);
+    reply.send({ object: "list", data: events });
   });
 
   app.post(
@@ -498,27 +515,7 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
         });
         return;
       }
-      const body = req.body ?? {};
-      const run = await startBenchmarkRun(paths, {
-        suite: body.suite,
-        exampleId: body.exampleId,
-        scenarioPath: body.scenarioPath,
-        modelOverride: body.modelOverride,
-        outPath: body.outPath,
-        configPath: body.configPath,
-        profile: body.profile,
-        baselinePath: body.baselinePath,
-        executionMode: body.executionMode,
-        updateCapCache: body.updateCapCache,
-        capTtlDays: body.capTtlDays,
-        temperature: body.temperature,
-        top_p: body.top_p,
-        max_tokens: body.max_tokens,
-        presence_penalty: body.presence_penalty,
-        frequency_penalty: body.frequency_penalty,
-        seed: body.seed,
-        stop: body.stop,
-      });
+      const run = await startBenchmarkRun(paths, normalizeBenchmarkRunRequest(req.body));
       reply.code(202).send(run);
     }
   );
@@ -682,6 +679,23 @@ function isAuthorized(req: FastifyRequest, token?: string): boolean {
   }
   const remote = req.socket.remoteAddress ?? "";
   return remote === "127.0.0.1" || remote === "::1";
+}
+
+function parseEventWindow(input: string): number | null {
+  const match = input.match(/^(\d+)(h|d|m)$/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  switch (match[2]) {
+    case "m":
+      return value * 60 * 1000;
+    case "h":
+      return value * 60 * 60 * 1000;
+    case "d":
+      return value * 24 * 60 * 60 * 1000;
+    default:
+      return null;
+  }
 }
 
 function enrichDiscoveredModel(

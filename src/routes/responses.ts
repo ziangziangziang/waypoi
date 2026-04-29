@@ -5,7 +5,7 @@ import { routeRequest } from "../routing/router";
 import { logRequest } from "../storage/repositories";
 import { RequestLog, ResponsesApiRequest } from "../types";
 import { StoragePaths } from "../storage/files";
-import { selectPoolCandidates } from "../pools/scheduler";
+import { selectVirtualModelCandidates } from "../virtualModels/scheduler";
 import { pickBestProviderModelByCapabilities } from "../providers/modelRegistry";
 import { normalizeMessagesForUpstream, scanMessageModalities } from "../utils/messageMedia";
 import { setCaptureDerivedRequest, setCaptureError, setCaptureResponseOverride, setCaptureRouting } from "../middleware/requestCapture";
@@ -757,7 +757,7 @@ async function sendAsSSE(reply: FastifyReply, response: ResponsesApiResponse): P
 }
 
 async function pickDefaultModel(paths: StoragePaths): Promise<string | null> {
-  const smart = await selectPoolCandidates(paths, "smart", {
+  const smart = await selectVirtualModelCandidates(paths, "smart", {
     requiredInput: ["text"],
     requiredOutput: ["text"],
   }, {

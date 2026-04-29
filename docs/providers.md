@@ -11,8 +11,8 @@ External clients still use OpenAI-compatible `/v1/*` endpoints; adapters transla
    - protocol-specific config (for `inference_v2`: `endpoint.router`)
 2. Import with:
    - `waypoi providers import --registry <registry.yaml> --env-file .env`
-3. Rebuild pools:
-   - `waypoi providers import ...` (default auto rebuild) or `POST /admin/pools/rebuild`
+3. Rebuild virtual models:
+   - `waypoi providers import ...` (default auto rebuild) or `POST /admin/virtual-models/rebuild`
 4. Verify:
    - `waypoi providers`
    - `waypoi providers show <id>`
@@ -50,7 +50,7 @@ Key fields:
 ## Notes
 
 - `inference_v2` v1 supports chat/vision sync (`stream=false`) only.
-- Streaming requests are rejected for this protocol unless another pool candidate supports streaming.
+- Streaming requests are rejected for this protocol unless another virtual model backend supports streaming.
 - `dashscope` uses Alibaba native APIs for:
   - `POST /v1/images/generations` and `POST /v1/images/edits` via DashScope multimodal image generation/editing
   - `POST /v1/videos/generations` via DashScope async video generation
@@ -58,7 +58,7 @@ Key fields:
 - DashScope image-capable models should declare both `text-to-image` and `image-to-image` when they support editing/reference-image generation. This is what makes them eligible for `/v1/images/edits`.
 - DashScope file transcription remains on the existing OpenAI-compatible HTTP route: `POST /v1/audio/transcriptions`.
 - Unknown protocols are imported but marked non-routable.
-- Pool alias surface is now a single `smart` alias; legacy `smart-*` aliases are rejected.
+- Virtual model alias surface is now a single `smart` alias; legacy `smart-*` aliases are rejected.
 - TLS inheritance:
   - Effective TLS mode is `model.insecureTls ?? provider.insecureTls ?? false`.
   - Models added without `--insecure-tls` inherit provider TLS mode.
@@ -88,9 +88,9 @@ This migration copies endpoint-managed models into provider `pcai`, then disable
 3. Verify:
    - `waypoi providers show pcai`
    - `waypoi models pcai`
-   - `waypoi providers pools`
+   - `waypoi providers virtual-models`
    - `waypoi ls` (legacy endpoints should show `disabled=yes`)
 4. Rollback (single model path):
    - Re-enable the endpoint in `config.yaml` (`disabled: false`) or via admin endpoint patch.
    - Set the corresponding `pcai` provider model `enabled: false` in `$WAYPOI_DIR/providers.json`.
-   - Rebuild pools: `waypoi providers pools` (or `POST /admin/pools/rebuild`).
+   - Rebuild virtual models: `waypoi providers virtual-models` (or `POST /admin/virtual-models/rebuild`).

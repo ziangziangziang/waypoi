@@ -5,7 +5,7 @@ import { routeRequest } from "../routing/router";
 import { logRequest } from "../storage/repositories";
 import { RequestLog } from "../types";
 import { StoragePaths } from "../storage/files";
-import { selectPoolCandidates } from "../pools/scheduler";
+import { selectVirtualModelCandidates } from "../virtualModels/scheduler";
 import { pickBestProviderModelByCapabilities } from "../providers/modelRegistry";
 import { setCaptureError, setCaptureResponseOverride, setCaptureRouting } from "../middleware/requestCapture";
 
@@ -259,7 +259,7 @@ export async function registerAudioRoutes(app: FastifyInstance, paths: StoragePa
 }
 
 async function pickDefaultAudioModel(paths: StoragePaths): Promise<string | null> {
-  const smart = await selectPoolCandidates(paths, "smart", {
+  const smart = await selectVirtualModelCandidates(paths, "smart", {
     requiredInput: ["audio"],
     requiredOutput: ["text"],
   }, {
@@ -282,7 +282,7 @@ async function pickDefaultAudioModel(paths: StoragePaths): Promise<string | null
 }
 
 async function pickDefaultTtsModel(paths: StoragePaths): Promise<string | null> {
-  const smart = await selectPoolCandidates(paths, "smart", {
+  const smart = await selectVirtualModelCandidates(paths, "smart", {
     requiredInput: ["text"],
     requiredOutput: ["audio"],
   }, {

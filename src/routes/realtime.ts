@@ -3,10 +3,10 @@ import net from "net";
 import tls from "tls";
 import { IncomingMessage } from "http";
 import { Duplex } from "stream";
-import { selectPoolCandidates } from "../pools/scheduler";
+import { selectVirtualModelCandidates } from "../virtualModels/scheduler";
 import { resolveModel } from "../providers/modelRegistry";
 import { StoragePaths } from "../storage/files";
-import { PoolCandidate } from "../pools/types";
+import { VirtualModelCandidate } from "../virtualModels/types";
 import { ModelModality } from "../types";
 
 const REALTIME_PATH = "/api-ws/v1/realtime";
@@ -60,7 +60,7 @@ async function handleRealtimeUpgrade(
 export async function resolveRealtimeCandidate(
   paths: StoragePaths,
   model: string
-): Promise<PoolCandidate | null> {
+): Promise<VirtualModelCandidate | null> {
   const requirements: {
     requiredInput: ModelModality[];
     requiredOutput: ModelModality[];
@@ -70,8 +70,8 @@ export async function resolveRealtimeCandidate(
   };
   const resolved = await resolveModel(paths, model, requirements);
 
-  if (resolved.kind === "pool") {
-    const selection = await selectPoolCandidates(paths, resolved.alias, requirements);
+  if (resolved.kind === "virtual_model") {
+    const selection = await selectVirtualModelCandidates(paths, resolved.alias, requirements);
     return (
       selection?.candidates.find(
         (candidate) =>
@@ -102,7 +102,7 @@ async function proxyRealtimeSocket(
   request: IncomingMessage,
   clientSocket: Duplex,
   head: Buffer,
-  candidate: PoolCandidate,
+  candidate: VirtualModelCandidate,
   authorizationHeader: string
 ): Promise<void> {
   const upstreamUrl = buildRealtimeUpstreamUrl(candidate.baseUrl, request.url ?? REALTIME_PATH);

@@ -2,18 +2,19 @@ import { EndpointDoc, EndpointType, ModelModality, UpstreamError, UpstreamResult
 import { classifyHttpStatus, classifyUpstreamError, proxyUpstream } from "../transport/httpClient";
 import { StoragePaths } from "../storage/files";
 import {
-  buildEndpointFromCandidate,
+  buildEndpointFromVirtualModelCandidate,
   estimateTokensFromPayload,
-  markPoolAttempt,
-  markPoolFailure,
-  markPoolSuccess,
-  selectPoolCandidates,
-} from "../pools/scheduler";
-import { PoolCandidate } from "../pools/types";
+  markVirtualModelAttempt,
+  markVirtualModelFailure,
+  markVirtualModelSuccess,
+  selectVirtualModelCandidates,
+} from "../virtualModels/scheduler";
+import { VirtualModelCandidate } from "../virtualModels/types";
 import { getProtocolAdapter, routePathToOperation } from "../protocols/registry";
 import { PreparedUpstreamRequest, ProtocolAdapter, ProtocolNormalizeResponseContext } from "../protocols/types";
 import { resolveModel } from "../providers/modelRegistry";
 import { setProviderModelInsecureTls } from "../providers/repository";
+import { appendVirtualModelSwitchEvent } from "../virtualModels/repository";
 
 export interface RouteAttempt {
   endpoint: EndpointDoc;
@@ -71,7 +72,7 @@ export async function routeRequest(
     error.retryable = false;
     throw error;
   }
-  if (resolved.kind === "deprecated_pool_alias") {
+  if (resolved.kind === "deprecated_virtual_model_alias") {
     const error = new Error(
       `Model alias '${resolved.input}' is deprecated. Use '${resolved.replacement}' instead.`
     ) as UpstreamError;
@@ -86,8 +87,8 @@ export async function routeRequest(
     throw error;
   }
 
-  if (resolved.kind === "pool") {
-    const poolSelection = await selectPoolCandidates(
+  if (resolved.kind === "virtual_model") {
+    const virtualModelSelection = await selectVirtualModelCandidates(
       paths,
       resolved.alias,
       {
@@ -96,14 +97,14 @@ export async function routeRequest(
       },
       operation ? { operation, stream: streamRequested } : undefined
     );
-    if (!poolSelection || poolSelection.candidates.length === 0) {
-      const exhaustedByLimits = poolSelection?.skipped.some(
+    if (!virtualModelSelection || virtualModelSelection.candidates.length === 0) {
+      const exhaustedByLimits = virtualModelSelection?.skipped.some(
         (item) => item.reason === "cooldown" || item.reason === "request_budget_exhausted"
       );
-      const streamUnsupported = poolSelection?.skipped.some(
+      const streamUnsupported = virtualModelSelection?.skipped.some(
         (item) => item.reason === "stream_unsupported"
       );
-      const operationUnsupported = poolSelection?.skipped.some(
+      const operationUnsupported = virtualModelSelection?.skipped.some(
         (item) => item.reason === "unsupported_operation"
       );
       const error = new Error("No eligible endpoints for model") as UpstreamError;
@@ -117,15 +118,15 @@ export async function routeRequest(
       error.retryable = Boolean(exhaustedByLimits);
       throw error;
     }
-    return routeWithPoolCandidates(
+    return routeWithVirtualModelCandidates(
       paths,
       resolved.alias,
       path,
       payload,
       headers,
       signal,
-      poolSelection.pool.id,
-      poolSelection.candidates,
+      virtualModelSelection.virtualModel.id,
+      virtualModelSelection.candidates,
       requirements,
       operation,
       streamRequested
@@ -143,7 +144,7 @@ export async function routeRequest(
     error.retryable = false;
     throw error;
   }
-  return routeWithPoolCandidates(
+  return routeWithVirtualModelCandidates(
     paths,
     resolved.canonicalId,
     path,
@@ -158,7 +159,7 @@ export async function routeRequest(
   );
 }
 
-async function routeWithPoolCandidates(
+async function routeWithVirtualModelCandidates(
   paths: StoragePaths,
   publicModel: string,
   path: string,
@@ -166,7 +167,7 @@ async function routeWithPoolCandidates(
   headers: Record<string, string | string[] | undefined>,
   signal: AbortSignal,
   poolId: string,
-  candidates: PoolCandidate[],
+  candidates: VirtualModelCandidate[],
   requirements: RouteRequirements | undefined,
   operation: ReturnType<typeof routePathToOperation>,
   streamRequested: boolean
@@ -181,6 +182,8 @@ async function routeWithPoolCandidates(
   let lastError: UpstreamError | null = null;
   let attempts = 0;
   let rateLimitSwitches = 0;
+  let previousCandidate: VirtualModelCandidate | undefined;
+  let previousSwitchReason: "request_budget_exhausted" | "cooldown" | "rate_limited" | "retryable_error" | "fallback" = "fallback";
   const seenProviders = new Set<string>();
   const seenModels = new Set<string>();
   const triedModels: string[] = [];
@@ -188,6 +191,14 @@ async function routeWithPoolCandidates(
   const isSmartAlias = publicModel === "smart";
 
   for (const candidate of candidates) {
+    if (previousCandidate) {
+      await appendVirtualModelSwitchEvent(paths, {
+        virtualModelId: poolId,
+        fromCandidateId: previousCandidate.id,
+        toCandidateId: candidate.id,
+        reason: previousSwitchReason,
+      }).catch(() => undefined);
+    }
     attempts += 1;
     seenProviders.add(candidate.providerId);
     seenModels.add(candidate.modelId);
@@ -196,7 +207,7 @@ async function routeWithPoolCandidates(
       triedModelSet.add(candidateName);
       triedModels.push(candidateName);
     }
-    const endpoint = buildEndpointFromCandidate(candidate);
+    const endpoint = buildEndpointFromVirtualModelCandidate(candidate);
     const adapter = getProtocolAdapter(candidate.protocol);
     if (!adapter) {
       continue;
@@ -214,7 +225,7 @@ async function routeWithPoolCandidates(
 
     const timeoutMs = candidate.limits?.timeoutMs ?? 60_000;
     const start = Date.now();
-    await markPoolAttempt(paths, candidate, estimateTokensFromPayload(payload));
+    await markVirtualModelAttempt(paths, candidate, estimateTokensFromPayload(payload));
     let requestData: PreparedUpstreamRequest | null = null;
 
     try {
@@ -243,7 +254,7 @@ async function routeWithPoolCandidates(
       const latency = Date.now() - start;
       const classification = classifyHttpStatus(response.statusCode);
       if (isSmartAlias && shouldFailoverForIncompatibleStatus(response.statusCode)) {
-        await markPoolFailure(paths, candidate, {
+        await markVirtualModelFailure(paths, candidate, {
           error: `operation_unsupported_${response.statusCode}`,
           headers: response.headers,
         });
@@ -251,13 +262,18 @@ async function routeWithPoolCandidates(
         lastError = new Error(`Incompatible status ${response.statusCode}`) as UpstreamError;
         lastError.type = classification.type;
         lastError.retryable = true;
+        previousSwitchReason = "retryable_error";
+        previousCandidate = candidate;
         continue;
       }
       if (classification.retryable) {
         if (response.statusCode === 429) {
           rateLimitSwitches += 1;
+          previousSwitchReason = "rate_limited";
+        } else {
+          previousSwitchReason = "retryable_error";
         }
-        await markPoolFailure(paths, candidate, {
+        await markVirtualModelFailure(paths, candidate, {
           error: classification.type,
           rateLimited: response.statusCode === 429,
           headers: response.headers,
@@ -266,6 +282,7 @@ async function routeWithPoolCandidates(
         lastError = new Error(`Retryable status ${response.statusCode}`) as UpstreamError;
         lastError.type = classification.type;
         lastError.retryable = true;
+        previousCandidate = candidate;
         continue;
       }
 
@@ -285,7 +302,7 @@ async function routeWithPoolCandidates(
         response
       );
 
-      await markPoolSuccess(paths, candidate, latency);
+      await markVirtualModelSuccess(paths, candidate, latency);
       return {
         attempt: {
           endpoint,
@@ -313,7 +330,7 @@ async function routeWithPoolCandidates(
         isHostnameAllowlisted(candidate)
       ) {
         const insecureEndpoint = { ...endpoint, insecureTls: true };
-        await markPoolAttempt(paths, candidate, estimateTokensFromPayload(payload));
+        await markVirtualModelAttempt(paths, candidate, estimateTokensFromPayload(payload));
         try {
           const retryResponse = await proxyUpstream(
             insecureEndpoint,
@@ -327,7 +344,7 @@ async function routeWithPoolCandidates(
           const latency = Date.now() - start;
           const retryClassification = classifyHttpStatus(retryResponse.statusCode);
           if (isSmartAlias && shouldFailoverForIncompatibleStatus(retryResponse.statusCode)) {
-            await markPoolFailure(paths, candidate, {
+            await markVirtualModelFailure(paths, candidate, {
               error: `operation_unsupported_${retryResponse.statusCode}`,
               headers: retryResponse.headers,
             });
@@ -335,13 +352,18 @@ async function routeWithPoolCandidates(
             lastError = new Error(`Incompatible status ${retryResponse.statusCode}`) as UpstreamError;
             lastError.type = retryClassification.type;
             lastError.retryable = true;
+            previousSwitchReason = "retryable_error";
+            previousCandidate = candidate;
             continue;
           }
           if (retryClassification.retryable) {
             if (retryResponse.statusCode === 429) {
               rateLimitSwitches += 1;
+              previousSwitchReason = "rate_limited";
+            } else {
+              previousSwitchReason = "retryable_error";
             }
-            await markPoolFailure(paths, candidate, {
+            await markVirtualModelFailure(paths, candidate, {
               error: retryClassification.type,
               rateLimited: retryResponse.statusCode === 429,
               headers: retryResponse.headers,
@@ -350,6 +372,7 @@ async function routeWithPoolCandidates(
             lastError = new Error(`Retryable status ${retryResponse.statusCode}`) as UpstreamError;
             lastError.type = retryClassification.type;
             lastError.retryable = true;
+            previousCandidate = candidate;
             continue;
           }
 
@@ -378,7 +401,7 @@ async function routeWithPoolCandidates(
             );
           }
 
-          await markPoolSuccess(paths, candidate, latency);
+          await markVirtualModelSuccess(paths, candidate, latency);
           return {
             attempt: {
               endpoint: insecureEndpoint,
@@ -405,13 +428,15 @@ async function routeWithPoolCandidates(
         classified.message = tlsVerifyFailureMessage(candidate);
       }
       lastError = classified;
-      await markPoolFailure(paths, candidate, {
+      await markVirtualModelFailure(paths, candidate, {
         error: classified.type,
         rateLimited: classified.type === "rate_limited",
       });
       if (!classified.retryable) {
         throw maybeEnrichSmartError(classified, triedModels, poolId, isSmartAlias);
       }
+      previousSwitchReason = classified.type === "rate_limited" ? "rate_limited" : "retryable_error";
+      previousCandidate = candidate;
     }
   }
 
@@ -447,7 +472,7 @@ function maybeEnrichSmartError(
   return error;
 }
 
-function isHostnameAllowlisted(candidate: PoolCandidate): boolean {
+function isHostnameAllowlisted(candidate: VirtualModelCandidate): boolean {
   const allowlist = candidate.autoInsecureTlsDomains ?? [];
   if (allowlist.length === 0) {
     return false;
@@ -475,7 +500,7 @@ function matchesDomainSuffix(hostname: string, suffix: string): boolean {
   return hostname === normalizedSuffix || hostname.endsWith(`.${normalizedSuffix}`);
 }
 
-function tlsVerifyFailureMessage(candidate: PoolCandidate): string {
+function tlsVerifyFailureMessage(candidate: VirtualModelCandidate): string {
   return `Upstream TLS verify failed for ${candidate.providerId}/${candidate.modelId}. Configure provider/model insecureTls or provider allowlist.`;
 }
 

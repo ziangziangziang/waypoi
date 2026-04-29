@@ -4,7 +4,7 @@ import { routeRequest } from "../routing/router";
 import { logRequest } from "../storage/repositories";
 import { RequestLog } from "../types";
 import { StoragePaths } from "../storage/files";
-import { selectPoolCandidates } from "../pools/scheduler";
+import { selectVirtualModelCandidates } from "../virtualModels/scheduler";
 import { pickBestProviderModelByCapabilities } from "../providers/modelRegistry";
 import { setCaptureError, setCaptureRouting } from "../middleware/requestCapture";
 import { setStatsPayload } from "../middleware/requestStats";
@@ -19,7 +19,7 @@ export async function registerEmbeddingsRoutes(app: FastifyInstance, paths: Stor
   app.post("/v1/embeddings", async (req: FastifyRequest, reply: FastifyReply) => {
     let body = req.body as EmbeddingsBody | undefined;
     if (!body?.model) {
-      const smart = await selectPoolCandidates(paths, "smart", {
+      const smart = await selectVirtualModelCandidates(paths, "smart", {
         requiredInput: ["text"],
         requiredOutput: ["embedding"],
       }, {

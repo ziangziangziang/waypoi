@@ -6,9 +6,41 @@
 
 export type ImageSize = '256x256' | '512x512' | '1024x1024' | '1024x1792' | '1792x1024'
 
+export interface GenerationParamsDraft {
+  temperature: string
+  topP: string
+  maxTokens: string
+  presencePenalty: string
+  frequencyPenalty: string
+  seed: string
+  stop: string
+}
+
+export interface GenerationParamsPayload {
+  temperature?: number
+  top_p?: number
+  max_tokens?: number
+  presence_penalty?: number
+  frequency_penalty?: number
+  seed?: number
+  stop?: string | string[]
+}
+
+export const DEFAULT_GENERATION_PARAMS: GenerationParamsDraft = {
+  temperature: '',
+  topP: '',
+  maxTokens: '',
+  presencePenalty: '',
+  frequencyPenalty: '',
+  seed: '',
+  stop: '',
+}
+
 export interface UserSettings {
   defaultImageSize: ImageSize
-  // Future settings can be added here
+  lastPlaygroundModel?: string
+  generationParams?: GenerationParamsDraft
+  generationParamsCompact?: boolean
 }
 
 const STORAGE_KEY = 'waypoi-settings'
@@ -36,7 +68,7 @@ export function loadSettings(): UserSettings {
   } catch (error) {
     console.error('Failed to load settings:', error)
   }
-  return DEFAULT_SETTINGS
+  return { ...DEFAULT_SETTINGS }
 }
 
 export function saveSettings(settings: UserSettings): void {

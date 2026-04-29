@@ -5,7 +5,8 @@ import {
   Settings as SettingsIcon,
   Radio,
   Gauge,
-  Search
+  Search,
+  Layers
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useEffect, useState } from 'react'
@@ -14,6 +15,7 @@ import { getAdminMeta, listProviders } from '@/api/client'
 const navItems = [
   { to: '/playground', icon: MessageSquare, label: 'Playground' },
   { to: '/benchmark', icon: Gauge, label: 'Benchmark' },
+  { to: '/virtual-models', icon: Layers, label: 'Virtual Models' },
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/peek', icon: Search, label: 'Peek' },
   { to: '/settings', icon: SettingsIcon, label: 'Settings' },

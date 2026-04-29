@@ -117,6 +117,43 @@ export interface BenchmarkCliOptions {
   stop?: string | string[];
 }
 
+export interface BenchmarkGenerationParameters {
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  seed?: number;
+  stop?: string | string[];
+}
+
+export interface BenchmarkRunRequest {
+  model?: string;
+  suite: string;
+  parameters?: BenchmarkGenerationParameters;
+
+  // Advanced/backward-compatible fields. These keep the current benchmark
+  // surface available while allowing the primary API shape to stay small.
+  exampleId?: string;
+  scenarioPath?: string;
+  modelOverride?: string;
+  outPath?: string;
+  configPath?: string;
+  profile?: string;
+  baselinePath?: string;
+  executionMode?: BenchmarkExecutionMode;
+  listExamples?: boolean;
+  updateCapCache?: boolean;
+  capTtlDays?: number;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  seed?: number;
+  stop?: string | string[];
+}
+
 export interface BenchmarkDefaults {
   requestTimeoutMs: number;
   toolTimeoutMs: number;
@@ -345,6 +382,7 @@ export interface BenchmarkReport {
   exampleId?: string;
   scenarioPath?: string;
   modelOverride?: string;
+  normalizedRequest?: BenchmarkRunRequest;
   configSource?: string;
   total: number;
   executed: number;
@@ -364,6 +402,7 @@ export interface BenchmarkReport {
     { total: number; executed: number; skipped: number; passed: number; failed: number }
   >;
   effectiveConfig: {
+    run: BenchmarkRunPlan;
     defaults: BenchmarkDefaults;
     profileSettings: BenchmarkProfileSettings;
     gates: BenchmarkGateConfig;

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { 
   Send, ImagePlus, Loader2, Bot, User, Sparkles, Plus, Trash2, 
   MessageSquare, ChevronRight, X, Image as ImageIcon, Wrench,
-  ToggleLeft, ToggleRight, StopCircle, Mic, PhoneCall, PhoneOff
+  ToggleLeft, ToggleRight, StopCircle, Mic, PhoneCall, PhoneOff, RefreshCw
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -35,7 +35,7 @@ import {
   type McpTool,
   type Model,
 } from '@/api/client'
-import { loadSettings, IMAGE_SIZE_OPTIONS, type ImageSize } from '@/stores/settings'
+import { loadSettings, updateSetting, saveSettings, IMAGE_SIZE_OPTIONS, DEFAULT_GENERATION_PARAMS, type ImageSize, type GenerationParamsDraft, type GenerationParamsPayload } from '@/stores/settings'
 import {
   buildUserPayload,
   findNonDataImageUrls,
@@ -70,6 +70,7 @@ interface Message {
   toolCalls?: ToolCall[]
   toolCallId?: string
   model?: string
+  generationParams?: GenerationParamsPayload
   createdAt: Date
 }
 
@@ -130,26 +131,6 @@ function firstSelectableModelId(models: Model[]): string {
 
 // Maximum tool iterations per user message to prevent infinite loops
 const MAX_TOOL_ITERATIONS = 10
-
-type GenerationParamsDraft = {
-  temperature: string
-  topP: string
-  maxTokens: string
-  presencePenalty: string
-  frequencyPenalty: string
-  seed: string
-  stop: string
-}
-
-type GenerationParamsPayload = {
-  temperature?: number
-  top_p?: number
-  max_tokens?: number
-  presence_penalty?: number
-  frequency_penalty?: number
-  seed?: number
-  stop?: string | string[]
-}
 
 type NumericGenerationParamKey =
   | 'temperature'
@@ -220,7 +201,7 @@ export function AgentPlayground() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<string>('')
+  const [selectedModel, setSelectedModel] = useState<string>(() => loadSettings().lastPlaygroundModel ?? '')
   const [models, setModels] = useState<Model[]>([])
 
   const selectedModelSupportsImageOutput = (): boolean => {
@@ -248,16 +229,11 @@ export function AgentPlayground() {
   const [callModeEnabled, setCallModeEnabled] = useState(false)
   const [callStatus, setCallStatus] = useState<'idle' | 'recording' | 'sending' | 'playing'>('idle')
   const [callError, setCallError] = useState<string | null>(null)
-  const [showGenerationParams, setShowGenerationParams] = useState(false)
-  const [generationParams, setGenerationParams] = useState<GenerationParamsDraft>({
-    temperature: '',
-    topP: '',
-    maxTokens: '',
-    presencePenalty: '',
-    frequencyPenalty: '',
-    seed: '',
-    stop: '',
-  })
+  const playgroundSettings = loadSettings()
+  const [generationParamsCompact, setGenerationParamsCompact] = useState(() => playgroundSettings.generationParamsCompact ?? true)
+  const [generationParams, setGenerationParams] = useState<GenerationParamsDraft>(() =>
+    playgroundSettings.generationParams ?? DEFAULT_GENERATION_PARAMS
+  )
   
   // Image generation settings
   const [imageSize, setImageSize] = useState<ImageSize>(() => loadSettings().defaultImageSize)
@@ -286,6 +262,18 @@ export function AgentPlayground() {
   const isPinnedToBottomRef = useRef(true)
   const forceScrollToBottomRef = useRef(false)
 
+  const saveGenerationParamsToSettings = useCallback((params: GenerationParamsDraft) => {
+    const saved = loadSettings()
+    saveSettings({ ...saved, generationParams: params })
+  }, [])
+
+  const rememberSelectedModel = useCallback((modelId: string) => {
+    setSelectedModel(modelId)
+    if (modelId) {
+      updateSetting('lastPlaygroundModel', modelId)
+    }
+  }, [])
+
   const resizeInput = useCallback(() => {
     const textarea = inputRef.current
     if (!textarea) return
@@ -305,23 +293,23 @@ export function AgentPlayground() {
         const response = await listModels()
         setModels(response.data)
         if (response.data.length > 0 && !selectedModel) {
-          setSelectedModel(firstSelectableModelId(response.data))
+          rememberSelectedModel(firstSelectableModelId(response.data))
         }
       } catch (error) {
         console.error('Failed to load models:', error)
       }
     }
     loadModels()
-  }, [selectedModel])
+  }, [rememberSelectedModel, selectedModel])
 
   // Ensure selected model stays selectable after health refreshes/session restore.
   useEffect(() => {
     if (models.length === 0) return
     const current = models.find((model) => model.id === selectedModel)
     if (!current || !isModelSelectable(current)) {
-      setSelectedModel(firstSelectableModelId(models))
+      rememberSelectedModel(firstSelectableModelId(models))
     }
-  }, [models, selectedModel])
+  }, [models, rememberSelectedModel, selectedModel])
 
   // Load sessions on mount
   useEffect(() => {
@@ -428,6 +416,7 @@ export function AgentPlayground() {
         role: normalized.role as Message['role'],
         content: normalizeContentMedia(normalized.content) as Message['content'],
         images: normalized.images,
+        model: normalized.model,
         createdAt: new Date(m.createdAt ?? m.timestamp ?? new Date().toISOString()),
       })}))
     } catch (error) {
@@ -1066,6 +1055,7 @@ export function AgentPlayground() {
       role: 'assistant',
       content: '',
       model: selectedModel,
+      generationParams: Object.keys(generationPayload).length > 0 ? generationPayload : undefined,
       createdAt: new Date(),
     }
     setMessages(prev => [...prev, normalizeMessageForUi(assistantMessage)])
@@ -1306,6 +1296,98 @@ export function AgentPlayground() {
     }
   }
 
+  const handleRegenerate = async (_assistantMessageId: string) => {
+    if (!selectedModelConfig || !isModelSelectable(selectedModelConfig)) {
+      setCallError('Selected model is unavailable. Choose a healthy model and try again.')
+      return
+    }
+    const { payload: generationPayload, error: generationParamError } = parseGenerationParams(generationParams)
+    if (generationParamError) {
+      setCallError(generationParamError)
+      return
+    }
+    stopAgentRef.current = false
+    setCallError(null)
+    enableFollowOutput()
+    setIsLoading(true)
+    const newAssistantMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      model: selectedModel,
+      generationParams: Object.keys(generationPayload).length > 0 ? generationPayload : undefined,
+      createdAt: new Date(),
+    }
+    setMessages(prev => [...prev, normalizeMessageForUi(newAssistantMessage)])
+    try {
+      if (agentModeEnabled && selectedTools.size > 0) {
+        await runAgentLoop(
+          [...messages, newAssistantMessage],
+          newAssistantMessage.id,
+          generationPayload
+        )
+        if (activeSessionId) await maybeAutoTitleSession(activeSessionId)
+      } else {
+        abortControllerRef.current = new AbortController()
+        isStreamingRef.current = true
+        const chatMessages = messages.map(toApiMessage) as ApiChatMessage[]
+        warnIfNonDataImageUrls(chatMessages, 'regenerate')
+        let streamState = createThinkingStreamState()
+        for await (const chunk of streamChatCompletion(
+          { model: selectedModel, messages: chatMessages, ...generationPayload },
+          abortControllerRef.current.signal
+        )) {
+          streamState = applyThinkingChunk(streamState, chunk)
+          const displayContent = toDisplayContent(streamState)
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === newAssistantMessage.id
+                ? { ...m, content: displayContent }
+                : m
+            )
+          )
+        }
+        const finalContent = toFinalContent(streamState)
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === newAssistantMessage.id
+              ? { ...m, content: finalContent }
+              : m
+          )
+        )
+        if (activeSessionId && finalContent) {
+          try {
+            await addMessageToSession(activeSessionId, {
+              role: 'assistant',
+              content: finalContent,
+              timestamp: new Date().toISOString(),
+              model: selectedModel,
+            })
+            await maybeAutoTitleSession(activeSessionId)
+          } catch (error) {
+            console.error('Failed to save assistant message:', error)
+          }
+        }
+      }
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') return
+      console.error('Regenerate error:', error)
+      setCallError((error as Error).message || 'Regeneration failed. Try again.')
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === newAssistantMessage.id
+            ? { ...m, content: 'Error occurred. Please try again.' }
+            : m
+        )
+      )
+    } finally {
+      setIsLoading(false)
+      abortControllerRef.current = null
+      stopAgentRef.current = false
+      isStreamingRef.current = false
+    }
+  }
+
   return (
     <div className="flex-1 flex h-full min-h-0 overflow-hidden">
       {/* Sessions Sidebar */}
@@ -1465,7 +1547,7 @@ export function AgentPlayground() {
           
           <select 
             value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
+            onChange={(e) => rememberSelectedModel(e.target.value)}
             className="bg-input border border-border rounded px-3 py-1.5 text-sm font-mono focus:ring-1 focus:ring-primary focus:outline-none"
           >
             {models.length === 0 && <option value="">No models available</option>}
@@ -1536,8 +1618,15 @@ export function AgentPlayground() {
                   style={{ animationDelay: `${index * 50}ms` }}
                 >
                   {message.role === 'assistant' && (
-                    <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center shrink-0">
-                      <Bot className="w-4 h-4 text-muted-foreground" />
+                    <div className="flex flex-col items-center gap-1 shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
+                        <Bot className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                      {message.model && (
+                        <span className="text-[9px] font-mono text-muted-foreground/50 truncate max-w-[5rem] select-none">
+                          {message.model}
+                        </span>
+                      )}
                     </div>
                   )}
                   {message.role === 'tool' && (
@@ -1614,7 +1703,36 @@ export function AgentPlayground() {
                       </div>
                     )}
                     {message.role === 'assistant' && message.model && (
-                      <p className="text-[10px] font-mono text-muted-foreground/60 mt-1.5 select-none">{message.model}</p>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <p className="text-[10px] font-mono text-muted-foreground/60 select-none">{message.model}</p>
+                        {message.generationParams && Object.keys(message.generationParams).length > 0 && (
+                          <span className="text-[10px] font-mono text-muted-foreground/40 select-none">
+                            {(() => {
+                              const params = message.generationParams!
+                              const parts = []
+                              if (params.temperature !== undefined) parts.push(`temp:${params.temperature}`)
+                              if (params.top_p !== undefined) parts.push(`top_p:${params.top_p}`)
+                              if (params.max_tokens !== undefined) parts.push(`tokens:${params.max_tokens}`)
+                              if (params.presence_penalty !== undefined) parts.push(`pres:${params.presence_penalty}`)
+                              if (params.frequency_penalty !== undefined) parts.push(`freq:${params.frequency_penalty}`)
+                              if (params.seed !== undefined) parts.push(`seed:${params.seed}`)
+                              if (params.stop) parts.push(`stop:${Array.isArray(params.stop) ? params.stop.join('/') : params.stop}`)
+                              return `[${parts.join(' ')}]`
+                            })()}
+                          </span>
+                        )}
+                        {!isLoading && (
+                          <button
+                            type="button"
+                            className="text-[10px] font-mono text-muted-foreground/40 hover:text-primary ml-auto flex items-center gap-0.5 transition-colors"
+                            onClick={() => handleRegenerate(message.id)}
+                            title="Regenerate with current params"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            Rerun
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                   {message.role === 'user' && (
@@ -1626,9 +1744,16 @@ export function AgentPlayground() {
               ))}
               
               {isLoading && messages[messages.length - 1]?.content === '' && !messages[messages.length - 1]?.toolCalls && (
-                <div className="flex gap-3 items-center text-muted-foreground">
-                  <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                <div className="flex items-start gap-3 text-muted-foreground">
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    </div>
+                    {messages[messages.length - 1]?.model && (
+                      <span className="text-[9px] font-mono text-muted-foreground/50 truncate max-w-[5rem] select-none">
+                        {messages[messages.length - 1]?.model}
+                      </span>
+                    )}
                   </div>
                   <span className="text-sm font-mono">
                     {isExecutingTools 
@@ -1707,94 +1832,159 @@ export function AgentPlayground() {
                   </div>
                 </div>
               )}
-              <div className="mb-3">
-                <button
-                  type="button"
-                  className="w-full text-left text-xs font-mono text-muted-foreground border border-border rounded px-2 py-1 hover:bg-secondary/50"
-                  onClick={() => setShowGenerationParams((prev) => !prev)}
-                >
-                  {showGenerationParams ? 'Hide Generation Params' : 'Show Generation Params'}
-                </button>
-                {showGenerationParams && (
-                  <div className="mt-2 grid grid-cols-2 gap-2 rounded border border-border/60 bg-secondary/20 p-2">
-                    <label className="text-xs text-muted-foreground block">
-                      Temperature
-                      <input
-                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                        value={generationParams.temperature}
-                        onChange={(event) =>
-                          setGenerationParams((prev) => ({ ...prev, temperature: event.target.value }))
-                        }
-                        placeholder="e.g. 0.7"
-                      />
-                    </label>
-                    <label className="text-xs text-muted-foreground block">
-                      Top P
-                      <input
-                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                        value={generationParams.topP}
-                        onChange={(event) =>
-                          setGenerationParams((prev) => ({ ...prev, topP: event.target.value }))
-                        }
-                        placeholder="e.g. 1"
-                      />
-                    </label>
-                    <label className="text-xs text-muted-foreground block">
-                      Max Tokens
-                      <input
-                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                        value={generationParams.maxTokens}
-                        onChange={(event) =>
-                          setGenerationParams((prev) => ({ ...prev, maxTokens: event.target.value }))
-                        }
-                        placeholder="e.g. 512"
-                      />
-                    </label>
-                    <label className="text-xs text-muted-foreground block">
-                      Presence Penalty
-                      <input
-                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                        value={generationParams.presencePenalty}
-                        onChange={(event) =>
-                          setGenerationParams((prev) => ({ ...prev, presencePenalty: event.target.value }))
-                        }
-                        placeholder="-2 to 2"
-                      />
-                    </label>
-                    <label className="text-xs text-muted-foreground block">
-                      Frequency Penalty
-                      <input
-                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                        value={generationParams.frequencyPenalty}
-                        onChange={(event) =>
-                          setGenerationParams((prev) => ({ ...prev, frequencyPenalty: event.target.value }))
-                        }
-                        placeholder="-2 to 2"
-                      />
-                    </label>
-                    <label className="text-xs text-muted-foreground block">
-                      Seed
-                      <input
-                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                        value={generationParams.seed}
-                        onChange={(event) =>
-                          setGenerationParams((prev) => ({ ...prev, seed: event.target.value }))
-                        }
-                        placeholder="integer"
-                      />
-                    </label>
-                    <label className="text-xs text-muted-foreground block col-span-2">
-                      Stop Sequences (comma-separated)
-                      <input
-                        className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                        value={generationParams.stop}
-                        onChange={(event) =>
-                          setGenerationParams((prev) => ({ ...prev, stop: event.target.value }))
-                        }
-                        placeholder="END, STOP"
-                      />
-                    </label>
+              {/* Generation Params - Compact Badges (always visible) */}
+              <div className="mb-2">
+                {generationParamsCompact && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      className="text-[10px] font-mono text-muted-foreground hover:text-foreground px-1 py-0.5 rounded hover:bg-secondary/50"
+                      onClick={() => {
+                        setGenerationParamsCompact(false)
+                        saveSettings({ ...loadSettings(), generationParamsCompact: false })
+                      }}
+                      title="Expand to grid view"
+                    >
+                      ↕ Expand
+                    </button>
+                    {(["temperature", "topP", "maxTokens", "presencePenalty", "frequencyPenalty", "seed", "stop"] as const).map((key) => {
+                      const labels = { temperature: 'Temp', topP: 'TopP', maxTokens: 'Tokens', presencePenalty: 'Pres', frequencyPenalty: 'Freq', seed: 'Seed', stop: 'Stop' }
+                      const val = generationParams[key]
+                      const display = val || '—'
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className={cn(
+                            'text-xs font-mono px-1.5 py-0.5 rounded transition-colors cursor-pointer',
+                            val
+                              ? 'bg-primary/10 text-primary hover:bg-primary/20'
+                              : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-secondary/30'
+                          )}
+                          onClick={() => {
+                            setGenerationParams((prev) => {
+                              const next = { ...prev, [key]: '' }
+                              saveGenerationParamsToSettings(next)
+                              return next
+                            })
+                          }}
+                          title={`${labels[key]}: ${display} (click to clear)`}
+                        >
+                          {labels[key]}:{display}
+                        </button>
+                      )
+                    })}
                   </div>
+                )}
+                {!generationParamsCompact && (
+                  <>
+                    <div className="flex items-center gap-2 mb-1">
+                      <button
+                        type="button"
+                        className="text-[10px] font-mono text-muted-foreground hover:text-foreground px-1 py-0.5 rounded hover:bg-secondary/50 cursor-pointer"
+                        onClick={() => {
+                          setGenerationParamsCompact(true)
+                          saveSettings({ ...loadSettings(), generationParamsCompact: true })
+                        }}
+                        title="Compact to badges view"
+                      >
+                        ⚡ Compact
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 rounded border border-border/60 bg-secondary/20 p-2">
+                      <label className="text-xs text-muted-foreground block">
+                        Temperature
+                        <input
+                          className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                          value={generationParams.temperature}
+                          onChange={(event) => {
+                            const next = { ...generationParams, temperature: event.target.value }
+                            setGenerationParams(next)
+                            saveGenerationParamsToSettings(next)
+                          }}
+                          placeholder="e.g. 0.7"
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground block">
+                        Top P
+                        <input
+                          className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                          value={generationParams.topP}
+                          onChange={(event) => {
+                            const next = { ...generationParams, topP: event.target.value }
+                            setGenerationParams(next)
+                            saveGenerationParamsToSettings(next)
+                          }}
+                          placeholder="e.g. 1"
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground block">
+                        Max Tokens
+                        <input
+                          className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                          value={generationParams.maxTokens}
+                          onChange={(event) => {
+                            const next = { ...generationParams, maxTokens: event.target.value }
+                            setGenerationParams(next)
+                            saveGenerationParamsToSettings(next)
+                          }}
+                          placeholder="e.g. 512"
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground block">
+                        Presence Penalty
+                        <input
+                          className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                          value={generationParams.presencePenalty}
+                          onChange={(event) => {
+                            const next = { ...generationParams, presencePenalty: event.target.value }
+                            setGenerationParams(next)
+                            saveGenerationParamsToSettings(next)
+                          }}
+                          placeholder="-2 to 2"
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground block">
+                        Frequency Penalty
+                        <input
+                          className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                          value={generationParams.frequencyPenalty}
+                          onChange={(event) => {
+                            const next = { ...generationParams, frequencyPenalty: event.target.value }
+                            setGenerationParams(next)
+                            saveGenerationParamsToSettings(next)
+                          }}
+                          placeholder="-2 to 2"
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground block">
+                        Seed
+                        <input
+                          className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                          value={generationParams.seed}
+                          onChange={(event) => {
+                            const next = { ...generationParams, seed: event.target.value }
+                            setGenerationParams(next)
+                            saveGenerationParamsToSettings(next)
+                          }}
+                          placeholder="integer"
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground block col-span-2">
+                        Stop Sequences (comma-separated)
+                        <input
+                          className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                          value={generationParams.stop}
+                          onChange={(event) => {
+                            const next = { ...generationParams, stop: event.target.value }
+                            setGenerationParams(next)
+                            saveGenerationParamsToSettings(next)
+                          }}
+                          placeholder="END, STOP"
+                        />
+                      </label>
+                    </div>
+                  </>
                 )}
               </div>
               <form onSubmit={handleSubmit} className="flex gap-3">

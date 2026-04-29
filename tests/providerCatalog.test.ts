@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getProviderCatalogEntry, matchCatalogModel } from "../src/providers/catalog";
+import { getProviderCatalogEntry, matchCatalogModel } from "../src/providers/registry";
 
 test("provider catalog preset exposes provider payload fields without importing models", async () => {
-  const entry = await getProviderCatalogEntry("openrouter", { source: "free" });
+  const entry = await getProviderCatalogEntry("github-models", { source: "free" });
   assert.ok(entry);
   assert.equal(entry.preset.id, "openrouter");
   assert.equal(entry.preset.protocol, "openai");
@@ -16,13 +16,13 @@ test("provider catalog model matching supports both public id and upstream id", 
   const entry = await getProviderCatalogEntry("openrouter", { source: "free" });
   assert.ok(entry);
 
-  const byId = matchCatalogModel(entry, "openai-gpt-oss-120b");
+  const byId = matchCatalogModel(entry, "gpt-4.1");
   assert.ok(byId);
   assert.equal(byId.free, true);
 
-  const byUpstream = matchCatalogModel(entry, "openai/gpt-oss-120b:free");
+  const byUpstream = matchCatalogModel(entry, "openai/gpt-4.1");
   assert.ok(byUpstream);
-  assert.equal(byUpstream.id, "openai-gpt-oss-120b");
+  assert.equal(byUpstream.id, "gpt-4.1");
   assert.equal(typeof byUpstream.benchmark?.livebench, "number");
 });
 

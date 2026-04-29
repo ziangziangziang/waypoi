@@ -1,5 +1,5 @@
 import { routeRequest } from "../routing/router";
-import { selectPoolCandidates } from "../pools/scheduler";
+import { selectVirtualModelCandidates } from "../virtualModels/scheduler";
 import { pickBestProviderModelByCapabilities, resolveModel } from "../providers/modelRegistry";
 import { getMediaEntry, getMediaPath, storeMedia } from "../storage/imageCache";
 import { StoragePaths } from "../storage/files";
@@ -170,8 +170,8 @@ export async function shouldUseNativeImageRouteForModel(
     }
   );
 
-  if (resolved.kind === "pool") {
-    const selection = await selectPoolCandidates(
+  if (resolved.kind === "virtual_model") {
+    const selection = await selectVirtualModelCandidates(
       paths,
       resolved.alias,
       {
@@ -395,7 +395,7 @@ export function normalizeChatImagePayload(payload: unknown): unknown {
 }
 
 async function pickDefaultDiffusionModel(paths: StoragePaths): Promise<string | null> {
-  const smart = await selectPoolCandidates(
+  const smart = await selectVirtualModelCandidates(
     paths,
     "smart",
     {
@@ -423,7 +423,7 @@ async function pickDefaultDiffusionModel(paths: StoragePaths): Promise<string | 
 }
 
 async function pickDefaultImageEditModel(paths: StoragePaths): Promise<string | null> {
-  const smart = await selectPoolCandidates(
+  const smart = await selectVirtualModelCandidates(
     paths,
     "smart",
     {

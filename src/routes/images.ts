@@ -4,7 +4,7 @@ import { routeRequest } from "../routing/router";
 import { logRequest } from "../storage/repositories";
 import { ImageGenerationRequest, RequestLog } from "../types";
 import { StoragePaths } from "../storage/files";
-import { selectPoolCandidates } from "../pools/scheduler";
+import { selectVirtualModelCandidates } from "../virtualModels/scheduler";
 import { pickBestProviderModelByCapabilities } from "../providers/modelRegistry";
 import { resolveGenerationModel, runImageGeneration } from "../services/imageGeneration";
 import { setCaptureError, setCaptureRouting } from "../middleware/requestCapture";
@@ -255,7 +255,7 @@ export async function registerImageRoutes(app: FastifyInstance, paths: StoragePa
 }
 
 async function pickDefaultDiffusionModel(paths: StoragePaths): Promise<string | null> {
-  const smart = await selectPoolCandidates(paths, "smart", {
+  const smart = await selectVirtualModelCandidates(paths, "smart", {
     requiredInput: ["text"],
     requiredOutput: ["image"],
   }, {
@@ -278,7 +278,7 @@ async function pickDefaultDiffusionModel(paths: StoragePaths): Promise<string | 
 }
 
 async function pickDefaultImageEditModel(paths: StoragePaths): Promise<string | null> {
-  const smart = await selectPoolCandidates(paths, "smart", {
+  const smart = await selectVirtualModelCandidates(paths, "smart", {
     requiredInput: ["image", "text"],
     requiredOutput: ["image"],
   }, {

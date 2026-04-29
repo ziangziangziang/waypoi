@@ -9,6 +9,11 @@ Default behavior is showcase-first.
 
 ## Quick start
 
+The default benchmark policy is intentionally small: choose a `suite`, optionally
+pin a `model`, and pass generation `parameters` only when you want to tune the
+run. Advanced controls still exist for scenarios, profiles, baselines, and
+capability cache updates.
+
 ```bash
 # Default run: showcase suite, one visible replay per example
 waypoi bench
@@ -23,7 +28,7 @@ waypoi bench --example showcase-tinyqa-001
 waypoi bench --suite showcase --example showcase-tinyqa-001 --model smart
 
 # Run a diagnostic suite
-waypoi bench --mode diagnostic --suite pool_smoke
+waypoi bench --mode diagnostic --suite virtual_model_smoke
 
 # Add file-driven scenarios
 waypoi bench --scenario ./examples/scenarios/custom.yaml
@@ -32,20 +37,28 @@ waypoi bench --scenario ./examples/scenarios/custom.yaml
 waypoi bench --mode diagnostic --baseline ~/.config/waypoi/benchmarks/bench-2026-02-23T12-00-00-000Z.json
 ```
 
+Admin/API runs should prefer the simple request body:
+
+```json
+{
+  "model": "smart",
+  "suite": "showcase",
+  "parameters": {
+    "temperature": 0,
+    "top_p": 1,
+    "max_tokens": 512
+  }
+}
+```
+
+The server normalizes this to the existing runner options. Legacy top-level
+fields such as `modelOverride`, `temperature`, `profile`, and `scenarioPath`
+remain supported for advanced callers.
+
 ## CLI options
 
 - `--suite <name>` built-in suite. Public default is `showcase`.
-- `--example <id>` run one built-in example from the selected suite.
-- `--list-examples` list built-in examples and exit.
-- `--mode <name>` `showcase` or `diagnostic`.
-- `--scenario <path>` scenario file (`.json`, `.jsonl`, `.yaml`, `.yml`).
 - `--model <name>` force one model for all scenarios.
-- `--out <path>` output file (`.json`/`.txt`) or output directory.
-- `--config <path>` benchmark config file (YAML or JSON).
-- `--profile <name>` config profile (default: `local`).
-- `--baseline <path>` previous benchmark report for p95/throughput deltas.
-- `--update-cap-cache` persist capability findings to `$WAYPOI_DIR/capabilities`.
-- `--cap-ttl-days <n>` capability TTL override for freshness (default `7`).
 - `--temperature <n>` run-level generation override for supported modes.
 - `--top-p <n>` run-level generation override (`0..1`) for supported modes.
 - `--max-tokens <n>` run-level generation override (`>=1`) for supported modes.
@@ -53,6 +66,19 @@ waypoi bench --mode diagnostic --baseline ~/.config/waypoi/benchmarks/bench-2026
 - `--frequency-penalty <n>` run-level generation override (`-2..2`) for supported modes.
 - `--seed <n>` optional run-level deterministic seed (`>=0`) for supported modes.
 - `--stop <value>` optional stop sequence (string) or comma-separated list in UI.
+
+Advanced options:
+
+- `--example <id>` run one built-in example from the selected suite.
+- `--list-examples` list built-in examples and exit.
+- `--mode <name>` `showcase` or `diagnostic`.
+- `--scenario <path>` scenario file (`.json`, `.jsonl`, `.yaml`, `.yml`).
+- `--out <path>` output file (`.json`/`.txt`) or output directory.
+- `--config <path>` benchmark config file (YAML or JSON).
+- `--profile <name>` config profile (default: `local`).
+- `--baseline <path>` previous benchmark report for p95/throughput deltas.
+- `--update-cap-cache` persist capability findings to `$WAYPOI_DIR/capabilities`.
+- `--cap-ttl-days <n>` capability TTL override for freshness (default `7`).
 
 ## Showcase examples
 
@@ -79,7 +105,7 @@ The older suites remain for engineering use:
 - `smoke`
 - `proxy`
 - `agent`
-- `pool_smoke`
+- `virtual_model_smoke`
 - `omni_call_smoke`
 - `capabilities`
 

@@ -112,24 +112,24 @@ const SUITES: Record<string, BenchmarkScenario[]> = {
       },
     },
   ],
-  pool_smoke: [
+  virtual_model_smoke: [
     {
-      id: "pool-smart-chat",
+      id: "virtual-model-smart-chat",
       mode: "chat",
       model: "smart",
-      prompt: "Reply exactly with: WAYPOI_POOL_SMOKE_OK",
+      prompt: "Reply exactly with: WAYPOI_VIRTUAL_MODEL_SMOKE_OK",
       assertions: {
-        contains: ["WAYPOI_POOL_SMOKE_OK"],
+        contains: ["WAYPOI_VIRTUAL_MODEL_SMOKE_OK"],
         statusCode: 200,
       },
     },
     {
-      id: "pool-smart-agent",
+      id: "virtual-model-smart-agent",
       mode: "agent",
       model: "smart",
-      prompt: "Answer with prefix WAYPOI_POOL_AGENT_DONE:",
+      prompt: "Answer with prefix WAYPOI_VIRTUAL_MODEL_AGENT_DONE:",
       assertions: {
-        contains: ["WAYPOI_POOL_AGENT_DONE:"],
+        contains: ["WAYPOI_VIRTUAL_MODEL_AGENT_DONE:"],
         statusCode: 200,
       },
     },

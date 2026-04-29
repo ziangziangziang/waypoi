@@ -12,6 +12,8 @@ import {
   ProviderProtocol,
   ProviderProtocolConfig,
 } from "./types";
+import { listAllProviders } from "./catalog/index";
+import type { ProviderCatalogSource, CatalogModelEntry } from "./catalog/types";
 
 interface RegistryFile {
   providers?: Array<{
@@ -61,7 +63,9 @@ interface ProviderConfigFile {
   }>;
 }
 
-interface CatalogLoadOptions {
+export type CatalogSourceType = "ts" | "yaml" | "free" | "file";
+
+export interface CatalogLoadOptions {
   source?: string;
 }
 
@@ -109,11 +113,36 @@ export function matchCatalogModel(
 }
 
 async function loadProviderCatalogIndex(options: CatalogLoadOptions): Promise<CatalogIndex> {
-  const source = options.source?.trim().toLowerCase() || "free";
-  if (source !== "free") {
-    return { entries: [], byId: new Map() };
+  const sourceType = options.source?.trim().toLowerCase() || "free";
+
+  if (sourceType === "yaml" || sourceType === "file") {
+    return await loadFromYaml(sourceType);
   }
 
+  if (sourceType === "free" || sourceType === "ts") {
+    return await loadFromTypeScript();
+  }
+
+  return { entries: [], byId: new Map() };
+}
+
+async function loadFromTypeScript(): Promise<CatalogIndex> {
+  const tsSources = listAllProviders();
+  const entries: ProviderCatalogEntry[] = [];
+
+  for (const source of tsSources) {
+    entries.push(toCatalogEntryFromSource(source));
+  }
+
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    entries,
+    byId: new Map(entries.map((entry) => [entry.id, entry])),
+  };
+}
+
+async function loadFromYaml(_sourceType: string): Promise<CatalogIndex> {
   const registryRaw = await fs.readFile(getRegistryPath(), "utf8");
   const registry = (YAML.parse(registryRaw) ?? {}) as RegistryFile;
   const referencesDir = getReferencesDir();
@@ -127,7 +156,7 @@ async function loadProviderCatalogIndex(options: CatalogLoadOptions): Promise<Ca
         const configPath = path.resolve(referencesDir, provider.file);
         const configRaw = await fs.readFile(configPath, "utf8");
         const config = (YAML.parse(configRaw) ?? {}) as ProviderConfigFile;
-        return toCatalogEntry(provider, config);
+        return toCatalogEntryFromYaml(provider, config);
       })
     )
   )
@@ -140,7 +169,69 @@ async function loadProviderCatalogIndex(options: CatalogLoadOptions): Promise<Ca
   };
 }
 
-function toCatalogEntry(
+function toCatalogEntryFromSource(source: ProviderCatalogSource): ProviderCatalogEntry {
+  const sourceModels = source.models;
+  const filteredModels = sourceModels
+    .filter((model): model is CatalogModelEntry & { id: string } => Boolean(model.id) && isCatalogModelSupportedTS(source.id, model))
+    .filter((model): model is CatalogModelEntry & { id: string } => Boolean(model.id))
+    .map((model) => ({
+      id: model.id,
+      upstreamModel: model.upstream,
+      free: model.free !== false,
+      capabilities: capabilitiesFromModalities(model.modalities, model.capabilities),
+      benchmark: typeof model.benchmark?.livebench === "number" ? { livebench: model.benchmark.livebench } : undefined,
+      supportsTools: model.capabilities?.tools === true,
+      supportsStreaming: model.capabilities?.streaming === true,
+      supportsVision: model.capabilities?.vision === true,
+    }));
+
+  const modelSummary: ProviderCatalogModelSummary = {
+    total: filteredModels.length,
+    free: filteredModels.filter((model) => model.free).length,
+    benchmarked: filteredModels.filter((model) => typeof model.benchmark?.livebench === "number").length,
+  };
+
+  const protocolConfig = parseProtocolConfigFromSource(source);
+  const supportsRouting = hasProtocolAdapter(source.endpoint.protocol) && !(source.endpoint.protocol === "inference_v2" && !protocolConfig?.router);
+  const readiness = supportsRouting ? "ready" : "unsupported";
+
+  return {
+    id: source.id,
+    source: "free",
+    name: source.name,
+    description: source.description,
+    docs: source.docs,
+    free: true,
+    readiness,
+    protocol: source.endpoint.protocol,
+    protocolRaw: source.endpoint.protocol,
+    modelSummary,
+    limits: summarizeLimits(source.limits),
+    preset: {
+      id: source.id,
+      name: source.name,
+      description: source.description,
+      docs: source.docs,
+      protocol: source.endpoint.protocol,
+      protocolRaw: source.endpoint.protocol,
+      protocolConfig,
+      baseUrl: resolveBaseUrlFromSource(source),
+      insecureTls: source.endpoint.insecureTls,
+      supportsRouting,
+      auth: {
+        type: source.auth.type as ProviderAuthConfig["type"],
+        keyParam: source.auth.keyParam,
+        headerName: undefined,
+        keyPrefix: source.auth.keyPrefix,
+      },
+      envVar: source.env,
+      limits: source.limits,
+    },
+    models: filteredModels,
+  };
+}
+
+function toCatalogEntryFromYaml(
   provider: NonNullable<RegistryFile["providers"]>[number],
   config: ProviderConfigFile
 ): ProviderCatalogEntry {
@@ -211,6 +302,27 @@ function toCatalogEntry(
   };
 }
 
+function resolveBaseUrlFromSource(source: ProviderCatalogSource): string {
+  const raw = source.endpoint.baseUrl.trim();
+  if (!raw.includes("{ACCOUNT_ID}") || !source.accountIdEnv) {
+    return raw;
+  }
+  const accountId = process.env[source.accountIdEnv];
+  return accountId ? raw.replaceAll("{ACCOUNT_ID}", accountId) : raw;
+}
+
+function parseProtocolConfigFromSource(source: ProviderCatalogSource): ProviderProtocolConfig | undefined {
+  if (source.endpoint.protocol !== "inference_v2") {
+    return undefined;
+  }
+  const router = (source.endpoint as typeof source.endpoint & { router?: string }).router;
+  const responseTextPaths = (source.endpoint as typeof source.endpoint & { responseTextPaths?: string[] }).responseTextPaths;
+  return {
+    router: router && router.length > 0 ? router : undefined,
+    responseTextPaths: (responseTextPaths || []).length > 0 ? responseTextPaths : undefined,
+  };
+}
+
 function resolveBaseUrl(config: ProviderConfigFile): string {
   const raw = typeof config.endpoint?.baseUrl === "string" ? config.endpoint.baseUrl.trim() : "";
   if (!raw.includes("{ACCOUNT_ID}")) {
@@ -221,9 +333,28 @@ function resolveBaseUrl(config: ProviderConfigFile): string {
   return accountId ? raw.replaceAll("{ACCOUNT_ID}", accountId) : raw;
 }
 
+function isCatalogModelSupportedTS(
+  providerId: string,
+  model: CatalogModelEntry
+): boolean {
+  const modalities = Array.isArray(model.modalities) ? model.modalities : [];
+  if (providerId === "cloudflare") {
+    return (
+      modalities.includes("text-to-text") &&
+      (model.capabilities?.streaming === true || typeof model.benchmark?.livebench === "number")
+    );
+  }
+  if (providerId === "ollama-cloud") {
+    return modalities.includes("text-to-text");
+  }
+  return true;
+}
+
+type ModelLike = { modalities?: string[]; capabilities?: { streaming?: boolean }; benchmark?: { livebench?: number } };
+
 function isCatalogModelSupported(
   providerId: string,
-  model: NonNullable<ProviderConfigFile["models"]>[number]
+  model: ModelLike
 ): boolean {
   const modalities = normalizeStringArray(model.modalities);
   if (providerId === "cloudflare") {

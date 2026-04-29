@@ -52,14 +52,14 @@ type ShowcaseExchange = {
 }
 
 const SHOWCASE_SUITE = 'showcase'
-const DIAGNOSTIC_SUITES = ['smoke', 'proxy', 'agent', 'pool_smoke', 'omni_call_smoke', 'capabilities']
+const DIAGNOSTIC_SUITES = ['smoke', 'proxy', 'agent', 'virtual_model_smoke', 'omni_call_smoke', 'capabilities']
 const ALL_SUITES = [SHOWCASE_SUITE, ...DIAGNOSTIC_SUITES]
 const SUITE_LABELS: Record<string, string> = {
   showcase: 'Showcase',
   smoke: 'Smoke',
   proxy: 'Proxy',
   agent: 'Agent',
-  pool_smoke: 'Pool Smoke',
+  virtual_model_smoke: 'Virtual Model Smoke',
   omni_call_smoke: 'Omni Call Smoke',
   capabilities: 'Capabilities',
 }
@@ -328,18 +328,18 @@ export function Benchmark() {
       const executionMode = isShowcase ? 'showcase' : 'diagnostic'
       const parsedCapTtl = Number(capTtlDays.trim())
       const run = await startBenchmarkRun({
+        model: selectedModel || undefined,
         suite,
+        parameters: paramPayload,
         exampleId: isShowcase && selectedExampleId ? selectedExampleId : undefined,
         profile,
         scenarioPath: scenarioPath.trim() || undefined,
-        modelOverride: selectedModel || undefined,
         executionMode,
         updateCapCache: updateCapCache || suite === 'capabilities',
         capTtlDays:
           capTtlDays.trim().length > 0 && Number.isFinite(parsedCapTtl) && parsedCapTtl >= 1
             ? Math.trunc(parsedCapTtl)
             : 7,
-        ...paramPayload,
       })
       setSelectedRunId(run.id)
       await loadRuns()
@@ -436,6 +436,20 @@ export function Benchmark() {
               <span className="panel-title">Run Setup</span>
             </div>
             <div className="p-3 space-y-3">
+              <label className="text-xs text-muted-foreground block">
+                Model
+                <select
+                  className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
+                  value={selectedModel}
+                  onChange={(event) => setSelectedModel(event.target.value)}
+                >
+                  <option value="">(auto)</option>
+                  {models.map((model) => (
+                    <option key={model.id} value={model.id}>{model.id}</option>
+                  ))}
+                </select>
+              </label>
+
               <label className="text-xs text-muted-foreground block">
                 Suite
                 <select
@@ -574,20 +588,6 @@ export function Benchmark() {
                     >
                       {PROFILES.map((item) => (
                         <option key={item} value={item}>{item}</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="text-xs text-muted-foreground block">
-                    Model Override
-                    <select
-                      className="mt-1 w-full bg-input border border-border rounded px-2 py-1 text-sm font-mono"
-                      value={selectedModel}
-                      onChange={(event) => setSelectedModel(event.target.value)}
-                    >
-                      <option value="">(auto)</option>
-                      {models.map((model) => (
-                        <option key={model.id} value={model.id}>{model.id}</option>
                       ))}
                     </select>
                   </label>

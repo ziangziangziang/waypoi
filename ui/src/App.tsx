@@ -5,6 +5,7 @@ import { Benchmark } from '@/pages/Benchmark'
 import { Dashboard } from '@/pages/Dashboard'
 import { Settings } from '@/pages/Settings'
 import { Peek } from '@/pages/Peek'
+import { VirtualModels } from '@/pages/VirtualModels'
 import './styles/globals.css'
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
           <Route index element={<Navigate to="/playground" replace />} />
           <Route path="playground" element={<AgentPlayground />} />
           <Route path="benchmark" element={<Benchmark />} />
+          <Route path="virtual-models" element={<VirtualModels />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="peek" element={<Peek />} />
           <Route path="settings" element={<Settings />} />

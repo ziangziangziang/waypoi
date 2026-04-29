@@ -1,6 +1,9 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { StoragePaths } from "../storage/files";
 import {
+  persistCaptureRecord,
+} from "../storage/captureRepository";
+import {
   createMcpService,
   McpService,
   McpServiceDependencyOverrides,
@@ -35,7 +38,12 @@ export async function registerMcpServiceRoutes(
         return;
       }
 
-      await mcpService.handleRequest(req.raw, reply.raw, req.body);
+      const capture = await maybeStartMcpToolCapture(req, reply, paths);
+      try {
+        await mcpService.handleRequest(req.raw, reply.raw, req.body);
+      } finally {
+        await capture?.finish();
+      }
       reply.hijack();
     },
   });
@@ -111,4 +119,107 @@ function normalizeAddress(value: string | undefined): string | null {
 
 function isLocalHost(host: string): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+async function maybeStartMcpToolCapture(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  paths: StoragePaths
+): Promise<{ finish: () => Promise<void> } | null> {
+  if (req.method !== "POST") return null;
+  const body = asRecord(req.body);
+  if (body?.method !== "tools/call") return null;
+
+  const startedAt = Date.now();
+  const chunks: Buffer[] = [];
+  const raw = reply.raw;
+  const originalWrite = raw.write.bind(raw);
+  const originalEnd = raw.end.bind(raw);
+  let finalized = false;
+
+  const finalize = async (): Promise<void> => {
+    if (finalized) return;
+    finalized = true;
+    raw.write = originalWrite as typeof raw.write;
+    raw.end = originalEnd as typeof raw.end;
+
+    const responseBody = payloadToBody(Buffer.concat(chunks));
+    const error = extractJsonRpcError(responseBody);
+    await persistCaptureRecord(paths, {
+      route: req.url,
+      method: req.method,
+      statusCode: raw.statusCode,
+      latencyMs: Date.now() - startedAt,
+      requestHeaders: req.headers as Record<string, string | string[] | undefined>,
+      responseHeaders: raw.getHeaders() as Record<string, string | string[] | undefined>,
+      requestBody: req.body,
+      responseBody,
+      error,
+    });
+  };
+
+  raw.write = ((chunk: unknown, ...args: unknown[]) => {
+    collectResponseChunk(chunks, chunk);
+    return originalWrite(chunk as never, ...(args as never[]));
+  }) as typeof raw.write;
+
+  raw.end = ((chunk?: unknown, ...args: unknown[]) => {
+    collectResponseChunk(chunks, chunk);
+    void finalize().finally(() => {
+      originalEnd(chunk as never, ...(args as never[]));
+    });
+    return raw;
+  }) as typeof raw.end;
+
+  return {
+    finish: async () => {
+      await finalize();
+    },
+  };
+}
+
+function collectResponseChunk(chunks: Buffer[], chunk: unknown): void {
+  if (chunk === null || chunk === undefined) return;
+  if (Buffer.isBuffer(chunk)) {
+    chunks.push(chunk);
+    return;
+  }
+  if (typeof chunk === "string") {
+    chunks.push(Buffer.from(chunk));
+    return;
+  }
+  if (chunk instanceof Uint8Array) {
+    chunks.push(Buffer.from(chunk));
+  }
+}
+
+function payloadToBody(payload: Buffer): unknown {
+  if (payload.byteLength === 0) return undefined;
+  const text = payload.toString("utf8");
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function extractJsonRpcError(value: unknown): { type?: string; message?: string } | undefined {
+  const body = asRecord(value);
+  const error = asRecord(body?.error);
+  if (!error) return undefined;
+  const message = typeof error.message === "string" ? error.message : undefined;
+  const data = asRecord(error.data);
+  const type =
+    typeof data?.type === "string"
+      ? data.type
+      : typeof error.code === "number"
+        ? `jsonrpc_${error.code}`
+        : "mcp_error";
+  return { type, message };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }

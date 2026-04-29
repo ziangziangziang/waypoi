@@ -26,6 +26,9 @@ export interface StoragePaths {
   providerHealthPath: string;
   requestLogPath: string;
   providersPath: string;
+  virtualModelsPath?: string;
+  virtualModelStatePath?: string;
+  virtualModelEventsPath?: string;
   poolsPath: string;
   poolStatePath: string;
 }
@@ -40,6 +43,9 @@ export function resolveStoragePaths(): StoragePaths {
     providerHealthPath: path.join(baseDir, "providers_health.json"),
     requestLogPath: path.join(baseDir, "request_logs.jsonl"),
     providersPath: path.join(baseDir, "providers.json"),
+    virtualModelsPath: path.join(baseDir, "virtual_models.json"),
+    virtualModelStatePath: path.join(baseDir, "virtual_model_state.json"),
+    virtualModelEventsPath: path.join(baseDir, "virtual_model_events.jsonl"),
     poolsPath: path.join(baseDir, "pools.json"),
     poolStatePath: path.join(baseDir, "pool_state.json"),
   };

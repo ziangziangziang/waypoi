@@ -426,6 +426,10 @@ function buildAnalysisProjection(
   responseBody: unknown,
   derived?: Record<string, unknown>
 ): CaptureAnalysisProjection {
+  if (route.startsWith("/mcp")) {
+    return buildMcpAnalysisProjection(route, requestBody, responseBody);
+  }
+
   const source = (derived?.normalizedRequest as Record<string, unknown> | undefined) ?? asRecord(requestBody);
   const messages = Array.isArray(source?.messages) ? source.messages : [];
   const toolsRaw = Array.isArray(source?.tools) ? source.tools : [];
@@ -517,6 +521,110 @@ function buildAnalysisProjection(
     rawSections,
     tokenFlow: buildTokenFlowProjection(route, source, responseBody),
   };
+}
+
+function buildMcpAnalysisProjection(
+  route: string,
+  requestBody: unknown,
+  responseBody: unknown
+): CaptureAnalysisProjection {
+  const requestTimeline = buildMcpRequestTimeline(requestBody);
+  const responseTimeline = buildMcpResponseTimeline(responseBody);
+  return {
+    systemMessages: [],
+    userMessages: [],
+    assistantMessages: [],
+    toolMessages: [],
+    requestTimeline,
+    responseTimeline,
+    tools: [],
+    mcpToolDescriptions: [],
+    agentsMdHints: [],
+    rawSections: requestTimeline.length > 0 ? ["request.body.params"] : [],
+    tokenFlow: buildTokenFlowProjection(route, asRecord(requestBody), responseBody),
+  };
+}
+
+function buildMcpRequestTimeline(requestBody: unknown): CaptureTimelineEntry[] {
+  const timeline: CaptureTimelineEntry[] = [];
+  const push = createTimelinePusher("request", timeline);
+  const body = asRecord(requestBody);
+  const params = asRecord(body?.params);
+  if (body?.method !== "tools/call" || !params) return timeline;
+
+  const name = typeof params.name === "string" ? params.name : undefined;
+  push({
+    kind: "tool_call",
+    role: "assistant",
+    sourcePath: "request.body.params",
+    name,
+    arguments: stringifyMaybe(params.arguments),
+    toolCallId: typeof body.id === "string" || typeof body.id === "number" ? String(body.id) : undefined,
+    metadata: { protocol: "mcp", method: "tools/call" },
+  });
+  return timeline;
+}
+
+function buildMcpResponseTimeline(responseBody: unknown): CaptureTimelineEntry[] {
+  const timeline: CaptureTimelineEntry[] = [];
+  const push = createTimelinePusher("response", timeline);
+  const body = asRecord(responseBody);
+  if (!body) {
+    if (typeof responseBody === "string" && responseBody) {
+      push({ kind: "message", sourcePath: "response.body", content: responseBody });
+    }
+    return timeline;
+  }
+
+  const error = asRecord(body.error);
+  if (error) {
+    push({
+      kind: "error",
+      sourcePath: "response.body.error",
+      content: typeof error.message === "string" ? error.message : stringifyMaybe(error),
+      metadata: error,
+    });
+    return timeline;
+  }
+
+  const result = asRecord(body.result);
+  if (result) {
+    const content = mcpResultContent(result);
+    push({
+      kind: "tool_result",
+      role: "tool",
+      sourcePath: "response.body.result",
+      content,
+      toolCallId: typeof body.id === "string" || typeof body.id === "number" ? String(body.id) : undefined,
+      metadata: typeof result.isError === "boolean" ? { isError: result.isError } : undefined,
+    });
+    return timeline;
+  }
+
+  push({
+    kind: "message",
+    sourcePath: "response.body",
+    content: stringifyMaybe(responseBody),
+  });
+  return timeline;
+}
+
+function mcpResultContent(result: Record<string, unknown>): string {
+  if (result.structuredContent !== undefined) {
+    return stringifyMaybe(result.structuredContent);
+  }
+  const content = Array.isArray(result.content) ? result.content : [];
+  const textParts: string[] = [];
+  for (const item of content) {
+    const record = asRecord(item);
+    if (!record) continue;
+    if (typeof record.text === "string") {
+      textParts.push(record.text);
+    } else if (record.data !== undefined || record.mimeType !== undefined) {
+      textParts.push(stringifyMaybe(record));
+    }
+  }
+  return textParts.length > 0 ? textParts.join("\n\n") : stringifyMaybe(result);
 }
 
 function buildRequestTimeline(
