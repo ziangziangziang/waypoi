@@ -5,7 +5,8 @@
   "license": "MIT",
   "main": "dist/src/index.js",
   "bin": {
-    "waypoi": "dist/cli/index.js"
+    "waypoi": "dist/cli/index.js",
+    "waypoi-dev": "dist/cli/index.js"
   },
   "repository": {
     "type": "git",
@@ -29,9 +30,9 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "concurrently -n server,ui -c blue,green \"tsx watch src/index.ts\" \"npm run dev --prefix ui\"",
-    "dev:server": "tsx watch src/index.ts",
-    "dev:all": "concurrently -n server,ui -c blue,green \"tsx watch src/index.ts\" \"npm run dev --prefix ui\"",
+    "dev": "concurrently -n server,ui -c blue,green \"WAYPOI_DEV=1 tsx watch src/index.ts\" \"VITE_BACKEND_PORT=9470 npm run dev --prefix ui\"",
+    "dev:server": "WAYPOI_DEV=1 tsx watch src/index.ts",
+    "dev:all": "concurrently -n server,ui -c blue,green \"WAYPOI_DEV=1 tsx watch src/index.ts\" \"VITE_BACKEND_PORT=9470 npm run dev --prefix ui\"",
     "build": "tsc -p tsconfig.json && cd ui && npm run build",
     "build:ui": "cd ui && npm run build",
     "build:all": "npm run build",

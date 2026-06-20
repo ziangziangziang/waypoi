@@ -28,9 +28,15 @@ import { listPools } from "./pools/repository";
 import { rebuildDefaultPools } from "./pools/builder";
 import { promises as fs } from "fs";
 import path from "path";
+import { appConfig } from "./config";
 
-const PORT = Number(process.env.PORT ?? "9469");
+if (!process.env.WAYPOI_DIR && appConfig.storageDirOverride) {
+  process.env.WAYPOI_DIR = appConfig.storageDirOverride;
+}
+
+const PORT = appConfig.port;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
+const APP_NAME = appConfig.appName;
 
 async function start(): Promise<void> {
   const app = Fastify({ logger: true });
@@ -39,7 +45,7 @@ async function start(): Promise<void> {
   try {
     await rebuildDefaultPools(paths);
   } catch (error) {
-    console.error(`[waypoi] Failed to rebuild smart pool: ${(error as Error).message}`);
+    console.error(`[${APP_NAME}] Failed to rebuild smart pool: ${(error as Error).message}`);
     if (process.env.WAYPOI_DEBUG_ERRORS === "1") {
       console.error(error);
     }
@@ -80,10 +86,10 @@ async function start(): Promise<void> {
   // Auto-connect to enabled MCP servers and discover tools
   discoverAllTools(paths).then((tools) => {
     if (tools.length > 0) {
-      console.log(`[waypoi] Connected to MCP servers, discovered ${tools.length} tools`);
+      console.log(`[${APP_NAME}] Connected to MCP servers, discovered ${tools.length} tools`);
     }
   }).catch((error) => {
-    console.error(`[waypoi] Failed to auto-connect to MCP servers: ${summarizeMcpError(error)}`);
+    console.error(`[${APP_NAME}] Failed to auto-connect to MCP servers: ${summarizeMcpError(error)}`);
     if (process.env.WAYPOI_DEBUG_ERRORS === "1") {
       console.error(error);
     }
@@ -96,10 +102,10 @@ async function start(): Promise<void> {
     const inferred = models.filter((model) => model.capabilities.source === "inferred").length;
     const enabledModels = models.filter((model) => model.enabled).length;
     console.log(
-      `[waypoi] Models: total=${models.length}, enabled=${enabledModels}, configured=${configured}, inferred=${inferred}`
+      `[${APP_NAME}] Models: total=${models.length}, enabled=${enabledModels}, configured=${configured}, inferred=${inferred}`
     );
   } catch (error) {
-    console.error(`[waypoi] Failed to summarize model capabilities: ${(error as Error).message}`);
+    console.error(`[${APP_NAME}] Failed to summarize model capabilities: ${(error as Error).message}`);
     if (process.env.WAYPOI_DEBUG_ERRORS === "1") {
       console.error(error);
     }
@@ -115,11 +121,11 @@ async function start(): Promise<void> {
       return acc;
     }, {});
     console.log(
-      `[waypoi] Providers: total=${providers.length}, enabled=${enabledProviders}, pools=${pools.length}`
+      `[${APP_NAME}] Providers: total=${providers.length}, enabled=${enabledProviders}, pools=${pools.length}`
     );
-    console.log(`[waypoi] Provider protocols: ${JSON.stringify(byProtocol)}`);
+    console.log(`[${APP_NAME}] Provider protocols: ${JSON.stringify(byProtocol)}`);
   } catch (error) {
-    console.error(`[waypoi] Failed to summarize providers: ${(error as Error).message}`);
+    console.error(`[${APP_NAME}] Failed to summarize providers: ${(error as Error).message}`);
     if (process.env.WAYPOI_DEBUG_ERRORS === "1") {
       console.error(error);
     }
@@ -132,7 +138,7 @@ async function start(): Promise<void> {
     // Reload auth config on config change
     const authConfig = await loadAuthConfig(paths);
     updateAuthConfig(authConfig);
-    console.log("[waypoi] Config reloaded - no restart needed");
+    console.log("[${APP_NAME}] Config reloaded - no restart needed");
   });
 
   // Graceful shutdown
@@ -170,15 +176,15 @@ async function start(): Promise<void> {
   
   // Auto-connect to the built-in /mcp endpoint so playground tools are available by default
   discoverBuiltinTools(paths, `http://localhost:${PORT}/mcp`).then((tools) => {
-    console.log(`[waypoi] Built-in MCP connected: ${tools.map((t) => t.name).join(", ") || "no tools"}`);
+    console.log(`[${APP_NAME}] Built-in MCP connected: ${tools.map((t) => t.name).join(", ") || "no tools"}`);
   }).catch((error) => {
-    console.error(`[waypoi] Failed to connect to built-in MCP: ${summarizeMcpError(error)}`);
+    console.error(`[${APP_NAME}] Failed to connect to built-in MCP: ${summarizeMcpError(error)}`);
     if (process.env.WAYPOI_DEBUG_ERRORS === "1") {
       console.error(error);
     }
   });
 
-  console.log(`\n🚀 Waypoi running on http://localhost:${PORT}`);
+  console.log(`\n🚀 ${APP_NAME} running on http://localhost:${PORT}`);
   console.log(`   Endpoints: /v1/chat/completions, /v1/embeddings, /v1/images/*, /v1/videos/*, /v1/audio/*`);
   console.log(`   MCP Service: /mcp`);
   console.log(`   Admin: /admin/*, /admin/stats, /admin/sessions, /admin/mcp, /admin/benchmarks/runs`);
