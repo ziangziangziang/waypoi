@@ -30,8 +30,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/v1': 'http://localhost:9469',
-      '/admin': 'http://localhost:9469',
+      '/v1': `http://localhost:${process.env.VITE_BACKEND_PORT ?? '9469'}`,
+      '/admin': `http://localhost:${process.env.VITE_BACKEND_PORT ?? '9469'}`,
     },
   },
 })

@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { StoragePaths } from "../storage/files";
+import { appConfig } from "../config";
 import {
   listMcpServers,
   getMcpServer,
@@ -195,7 +196,7 @@ export async function registerMcpRoutes(
     async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       try {
         if (req.params.id === BUILTIN_SERVER_ID) {
-          const port = Number(process.env.PORT ?? "9469");
+          const port = appConfig.port;
           const tools = await discoverBuiltinTools(paths, `http://localhost:${port}/mcp`);
           return reply.send({
             connected: true,

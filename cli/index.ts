@@ -42,6 +42,11 @@ import { ProviderModelRecord, ProviderProtocol, ProviderRecord } from "../src/pr
 import { ModelCapabilities, ModelModality } from "../src/types";
 import { rewriteLegacyArgv, LegacyRewriteResult } from "./legacyRewrite";
 import { parseModelRef } from "./modelRef";
+import { appConfig } from "../src/config";
+
+if (!process.env.WAYPOI_DIR && appConfig.storageDirOverride) {
+  process.env.WAYPOI_DIR = appConfig.storageDirOverride;
+}
 
 const program = new Command();
 
@@ -52,7 +57,9 @@ type CanonicalCommandContext = {
 };
 
 const paths = resolveStoragePaths();
-const pidFile = path.join(paths.baseDir, "waypoi.pid");
+const pidFile = path.join(paths.baseDir, appConfig.pidFileName);
+const DEFAULT_PORT = String(appConfig.port);
+const DISPLAY_NAME = appConfig.appName.charAt(0).toUpperCase() + appConfig.appName.slice(1);
 
 function resolveDefaultRegistryPath(): string {
   const candidates = [
@@ -137,9 +144,9 @@ function warnLegacyRewrite(result: LegacyRewriteResult): void {
 }
 
 program
-  .name("waypoi")
+  .name(appConfig.appName)
   .description("Waypoi proxy and operations CLI")
-  .version("0.5.3")
+  .version("0.7.1-beta.2")
   .option("--json", "Machine-readable JSON output where supported")
   .option("--quiet", "Suppress non-essential output")
   .option("--no-color", "Disable ANSI color output");
@@ -148,12 +155,12 @@ program.addHelpText(
   "after",
   `
 Examples:
-  waypoi providers
-  waypoi models
-  waypoi models show provider-id/model-id
-  waypoi service
-  waypoi logs -f
-  waypoi bench --suite smoke
+  ${appConfig.appName} providers
+  ${appConfig.appName} models
+  ${appConfig.appName} models show provider-id/model-id
+  ${appConfig.appName} service
+  ${appConfig.appName} logs -f
+  ${appConfig.appName} bench --suite smoke
 `
 );
 
@@ -393,10 +400,10 @@ const service = program
     await ensureStorageDir(paths);
     const pid = readPid(pidFile);
     if (pid && isRunning(pidFile)) {
-      console.log(`Waypoi is running (pid ${pid}).`);
+      console.log(`${DISPLAY_NAME} is running (pid ${pid}).`);
       return;
     }
-    console.log("Waypoi is not running.");
+    console.log(`${DISPLAY_NAME} is not running.`);
   });
 
 service
@@ -428,10 +435,10 @@ service
     await ensureStorageDir(paths);
     const pid = readPid(pidFile);
     if (pid && isRunning(pidFile)) {
-      console.log(`Waypoi is running (pid ${pid}).`);
+      console.log(`${DISPLAY_NAME} is running (pid ${pid}).`);
       return;
     }
-    console.log("Waypoi is not running.");
+    console.log(`${DISPLAY_NAME} is not running.`);
   });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2322,7 +2329,7 @@ program
   .option("--model <model>", "Model to use")
   .option("--session <id>", "Continue an existing session")
   .option("--no-stream", "Return full response instead of streaming")
-  .option("--port <port>", "Waypoi server port", "9469")
+  .option("--port <port>", "Waypoi server port", DEFAULT_PORT)
   .option("--json", "Output raw JSON response (implies --no-stream)")
   .action(async (message: string | undefined, options: {
     model?: string;
@@ -2361,7 +2368,7 @@ program
         const body = await resp.body.json() as { id?: string };
         sessionId = body.id;
       } catch (err) {
-        console.error(`Cannot reach server at ${baseUrl} — is it running? (waypoi service start)`);
+        console.error(`Cannot reach server at ${baseUrl} — is it running? (${appConfig.appName} service start)`);
         console.error((err as Error).message);
         process.exitCode = 1;
         return;
@@ -2446,7 +2453,7 @@ const sessions = program
   .command("sessions")
   .alias("session")
   .description("Manage chat sessions")
-  .option("--port <port>", "Waypoi server port", "9469")
+  .option("--port <port>", "Waypoi server port", DEFAULT_PORT)
   .option("--json", "Output as JSON")
   .action(async (options: { port: string; json?: boolean }) => {
     await listSessionsAction(options);
@@ -2479,7 +2486,7 @@ async function listSessionsAction(options: { port: string; json?: boolean }): Pr
       updated: s.updatedAt ? new Date(s.updatedAt).toLocaleString() : "-",
     })));
   } catch (err) {
-    console.error(`Cannot reach server — is it running? (waypoi service start)\n${(err as Error).message}`);
+    console.error(`Cannot reach server — is it running? (${appConfig.appName} service start)\n${(err as Error).message}`);
     process.exitCode = 1;
   }
 }
@@ -2488,7 +2495,7 @@ sessions
   .command("list")
   .alias("ls")
   .description("List sessions")
-  .option("--port <port>", "Waypoi server port", "9469")
+  .option("--port <port>", "Waypoi server port", DEFAULT_PORT)
   .option("--json", "Output as JSON")
   .action(async (options: { port: string; json?: boolean }) => {
     await listSessionsAction(options);
@@ -2497,7 +2504,7 @@ sessions
 sessions
   .command("show <id>")
   .description("Print full message history of a session")
-  .option("--port <port>", "Waypoi server port", "9469")
+  .option("--port <port>", "Waypoi server port", DEFAULT_PORT)
   .option("--json", "Output as JSON")
   .action(async (id: string, options: { port: string; json?: boolean }) => {
     const baseUrl = `http://localhost:${options.port}`;
@@ -2528,7 +2535,7 @@ sessions
   .command("rm <id>")
   .alias("delete")
   .description("Delete a session")
-  .option("--port <port>", "Waypoi server port", "9469")
+  .option("--port <port>", "Waypoi server port", DEFAULT_PORT)
   .action(async (id: string, options: { port: string }) => {
     const baseUrl = `http://localhost:${options.port}`;
     try {
@@ -2543,7 +2550,7 @@ sessions
 sessions
   .command("export <id>")
   .description("Export session messages as JSONL to stdout")
-  .option("--port <port>", "Waypoi server port", "9469")
+  .option("--port <port>", "Waypoi server port", DEFAULT_PORT)
   .action(async (id: string, options: { port: string }) => {
     const baseUrl = `http://localhost:${options.port}`;
     try {
@@ -2831,7 +2838,7 @@ async function startService(): Promise<void> {
   const existingPid = readPid(pidFile);
   if (existingPid) {
     if (isRunning(pidFile)) {
-      console.log("Waypoi is already running.");
+      console.log(`${DISPLAY_NAME} is already running.`);
       return;
     }
     fs.unlinkSync(pidFile);
@@ -2851,26 +2858,26 @@ async function startService(): Promise<void> {
     }
   });
   if (!child.pid) {
-    console.error("Failed to start Waypoi.");
+    console.error(`Failed to start ${DISPLAY_NAME}.`);
     process.exitCode = 1;
     return;
   }
   child.unref();
   fs.writeFileSync(pidFile, String(child.pid), "utf8");
-  console.log(`Waypoi started (pid ${child.pid}).`);
+  console.log(`${DISPLAY_NAME} started (pid ${child.pid}).`);
 }
 
 async function stopService(): Promise<void> {
   await ensureStorageDir(paths);
   const pid = readPid(pidFile);
   if (!pid) {
-    console.log("Waypoi is not running.");
+    console.log(`${DISPLAY_NAME} is not running.`);
     return;
   }
   try {
     process.kill(pid);
     fs.unlinkSync(pidFile);
-    console.log("Waypoi stopped.");
+    console.log(`${DISPLAY_NAME} stopped.`);
   } catch (error) {
     console.error(`Failed to stop: ${(error as Error).message}`);
     process.exitCode = 1;
