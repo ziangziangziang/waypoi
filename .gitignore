@@ -8,3 +8,4 @@ ui/dist
 .github/agents
 references/
 .playwright-mcp
+src/version.ts

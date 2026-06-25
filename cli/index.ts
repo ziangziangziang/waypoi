@@ -146,7 +146,7 @@ function warnLegacyRewrite(result: LegacyRewriteResult): void {
 program
   .name(appConfig.appName)
   .description("Waypoi proxy and operations CLI")
-  .version("0.7.1-beta.2")
+  .version("0.7.1-beta.3")
   .option("--json", "Machine-readable JSON output where supported")
   .option("--quiet", "Suppress non-essential output")
   .option("--no-color", "Disable ANSI color output");

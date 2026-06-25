@@ -33,6 +33,13 @@ Default output path rule:
 - Tool outputs must write under the workspace (default `./.waypoi/generated-images`).
 - Reject `output_path`/`output_dir` outside the workspace.
 
+Versioning:
+- Single source of truth is git tags (e.g. `v0.8.0-alpha.0`).
+- `scripts/version-from-git.js` runs via npm `pre` hooks to generate `src/version.ts` before build/dev/typecheck.
+- `package.json` version is `0.0.0` (placeholder — never edit manually).
+- To release: `git tag v<semver>` && `git push origin --tags`.
+- CI (if added) must checkout with `fetch-depth: 0` and run `npm version $(git describe --tags --abbrev=0 | sed 's/^v//') --no-git-tag-version` before `npm publish`.
+
 Quick pointers (where to look first):
 - MCP service: `src/mcp/service.ts`
 - MCP policy: `src/mcp/policy.ts`

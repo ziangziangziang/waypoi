@@ -1,6 +1,6 @@
 {
   "name": "waypoi",
-  "version": "0.7.1-beta.3",
+  "version": "0.0.0",
   "description": "Local OpenAI-compatible AI gateway with intelligent routing, failover, MCP tools, and a built-in playground UI",
   "license": "MIT",
   "main": "dist/src/index.js",
@@ -30,9 +30,13 @@
     "access": "public"
   },
   "scripts": {
+    "predev": "node scripts/version-from-git.js",
     "dev": "concurrently -n server,ui -c blue,green \"WAYPOI_DEV=1 tsx watch src/index.ts\" \"VITE_BACKEND_PORT=9470 npm run dev --prefix ui\"",
+    "predev:server": "node scripts/version-from-git.js",
     "dev:server": "WAYPOI_DEV=1 tsx watch src/index.ts",
+    "predev:all": "node scripts/version-from-git.js",
     "dev:all": "concurrently -n server,ui -c blue,green \"WAYPOI_DEV=1 tsx watch src/index.ts\" \"VITE_BACKEND_PORT=9470 npm run dev --prefix ui\"",
+    "prebuild": "node scripts/version-from-git.js",
     "build": "tsc -p tsconfig.json && cd ui && npm run build",
     "build:ui": "cd ui && npm run build",
     "build:all": "npm run build",
@@ -40,6 +44,7 @@
     "cli": "tsx cli/index.ts",
     "manual-test": "bash scripts/manual-test.sh",
     "test": "npx tsx --test tests/*.test.ts",
+    "pretypecheck": "node scripts/version-from-git.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

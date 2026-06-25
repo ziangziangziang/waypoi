@@ -1,7 +1,6 @@
 {
   "name": "@waypoi/ui",
   "private": true,
-  "version": "0.7.1-beta.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
