@@ -16,8 +16,19 @@ try {
   version = "0.0.0";
 }
 
+let branch = "";
+try {
+  branch = execSync("git rev-parse --abbrev-ref HEAD", {
+    cwd: root,
+    encoding: "utf8",
+  }).trim();
+} catch {}
+
+const isDev = branch === "dev";
+
 const content = `// Auto-generated from git tags. Do not edit manually.
 export const VERSION = ${JSON.stringify(version)};
+export const IS_DEV = ${JSON.stringify(isDev)};
 `;
 
 writeFileSync(join(root, "src", "version.ts"), content, "utf8");

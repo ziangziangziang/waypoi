@@ -1,4 +1,5 @@
 import path from "path";
+import { IS_DEV } from "./version.js";
 
 function resolveBinaryName(): string {
   if (process.argv.length >= 2) {
@@ -6,6 +7,7 @@ function resolveBinaryName(): string {
     if (bin === "waypoi" || bin === "waypoi-dev") return bin;
   }
   if (process.env.WAYPOI_DEV === "1") return "waypoi-dev";
+  if (IS_DEV) return "waypoi-dev";
   return "waypoi";
 }
 
