@@ -26,9 +26,8 @@ import { listProviders } from "./providers/repository";
 import { listModelsForApi } from "./providers/modelRegistry";
 import { listPools } from "./pools/repository";
 import { rebuildDefaultPools } from "./pools/builder";
-import { promises as fs } from "fs";
-import path from "path";
 import { appConfig } from "./config";
+import { VERSION } from "./version.js";
 
 if (!process.env.WAYPOI_DIR && appConfig.storageDirOverride) {
   process.env.WAYPOI_DIR = appConfig.storageDirOverride;
@@ -68,8 +67,7 @@ async function start(): Promise<void> {
   await registerResponsesRoutes(app, paths);
   
   // Admin routes
-  const version = await resolveAppVersion();
-  await registerAdminRoutes(app, paths, { adminToken: ADMIN_TOKEN, version });
+  await registerAdminRoutes(app, paths, { adminToken: ADMIN_TOKEN, version: VERSION });
   await registerStatsRoutes(app, paths);
   await registerSessionRoutes(app);
   await registerMcpRoutes(app, paths);
@@ -195,24 +193,3 @@ start().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-
-async function resolveAppVersion(): Promise<string> {
-  const candidates = [
-    path.join(process.cwd(), "package.json"),
-    path.join(__dirname, "..", "..", "package.json"),
-    path.join(__dirname, "..", "package.json"),
-  ];
-
-  for (const filePath of candidates) {
-    try {
-      const raw = await fs.readFile(filePath, "utf8");
-      const parsed = JSON.parse(raw) as { version?: string };
-      if (parsed.version && typeof parsed.version === "string") {
-        return parsed.version;
-      }
-    } catch {
-      // Try next candidate.
-    }
-  }
-  return "0.0.0";
-}
