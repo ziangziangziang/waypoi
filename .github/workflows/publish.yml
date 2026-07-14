@@ -28,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -64,6 +66,11 @@ jobs:
               echo "tag=latest" >> $GITHUB_OUTPUT
             fi
           fi
+
+      - name: Set package version from git tag
+        run: |
+          VERSION="$(git describe --tags --abbrev=0 | sed 's/^v//')"
+          npm version "$VERSION" --no-git-tag-version
 
       - name: Publish to npm
         run: npm publish --tag ${{ steps.npm_tag.outputs.tag }} --provenance --access public
