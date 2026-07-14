@@ -5,15 +5,15 @@ import { getProviderCatalogEntry, matchCatalogModel } from "../src/providers/reg
 test("provider catalog preset exposes provider payload fields without importing models", async () => {
   const entry = await getProviderCatalogEntry("github-models", { source: "free" });
   assert.ok(entry);
-  assert.equal(entry.preset.id, "openrouter");
+  assert.equal(entry.preset.id, "github-models");
   assert.equal(entry.preset.protocol, "openai");
   assert.equal(entry.preset.supportsRouting, true);
-  assert.match(entry.preset.baseUrl, /openrouter/i);
+  assert.match(entry.preset.baseUrl, /azure/i);
   assert.equal(entry.modelSummary.total > 0, true);
 });
 
 test("provider catalog model matching supports both public id and upstream id", async () => {
-  const entry = await getProviderCatalogEntry("openrouter", { source: "free" });
+  const entry = await getProviderCatalogEntry("github-models", { source: "free" });
   assert.ok(entry);
 
   const byId = matchCatalogModel(entry, "gpt-4.1");

@@ -40,9 +40,9 @@ const DATA_URL_A = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAA
 const DATA_URL_B = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAQAAABLbSncAAAADElEQVR42mP8z/CfAQADgwGfWQ36KQAAAABJRU5ErkJggg=='
 
 function toHashFromAdminUrl(url: string): string {
-  const match = url.match(/^\/admin\/media\/([a-f0-9]{16})$/)
+  const match = url.match(/^\/(?:admin|data)\/media\/([a-f0-9]{16})$/)
   if (!match) {
-    throw new Error(`Expected /admin/media/<hash> url, got ${url}`)
+    throw new Error(`Expected /data/media/<hash> url, got ${url}`)
   }
   return match[1]
 }
@@ -68,13 +68,13 @@ test('session message persistence normalizes image refs to local cache urls', as
   assert.ok(msg)
   assert.ok(Array.isArray(msg?.images))
   const imageRef = msg?.images?.[0] ?? ''
-  assert.match(imageRef, /^\/admin\/media\/[a-f0-9]{16}$/)
+  assert.match(imageRef, /^\/data\/media\/[a-f0-9]{16}$/)
 
   const contentImage = Array.isArray(msg?.content)
     ? msg?.content.find((part) => part.type === 'image_url')
     : null
   assert.ok(contentImage && contentImage.type === 'image_url')
-  assert.match(contentImage.image_url.url, /^\/admin\/media\/[a-f0-9]{16}$/)
+  assert.match(contentImage.image_url.url, /^\/data\/media\/[a-f0-9]{16}$/)
 
   const hash = toHashFromAdminUrl(contentImage.image_url.url)
   const mediaPath = await getMediaPath(paths, hash)
@@ -125,7 +125,7 @@ test('loading legacy inline-image session lazily migrates to local refs and bump
     ? loaded?.messages[0]?.content.find((part) => part.type === 'image_url')
     : null
   assert.ok(migratedImage && migratedImage.type === 'image_url')
-  assert.match(migratedImage.image_url.url, /^\/admin\/media\/[a-f0-9]{16}$/)
+  assert.match(migratedImage.image_url.url, /^\/data\/media\/[a-f0-9]{16}$/)
 
   const reReadRaw = JSON.parse(await fs.readFile(filePath, 'utf8')) as { storageVersion: number }
   assert.equal(reReadRaw.storageVersion, 2)
