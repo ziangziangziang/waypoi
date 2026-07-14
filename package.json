@@ -8,6 +8,12 @@
     "waypoi": "dist/cli/index.js",
     "waypoi-dev": "dist/cli/index.js"
   },
+  "files": [
+    "dist",
+    "ui/dist",
+    "README.md",
+    "LICENSE"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/ziangziangziang/waypoi.git"
@@ -39,6 +45,7 @@
     "prebuild": "node scripts/version-from-git.js",
     "build": "tsc -p tsconfig.json && cd ui && npm run build",
     "build:ui": "cd ui && npm run build",
+    "prepublishOnly": "npm ci && cd ui && npm install && npm run build",
     "build:all": "npm run build",
     "start": "node dist/src/index.js",
     "cli": "tsx cli/index.ts",
