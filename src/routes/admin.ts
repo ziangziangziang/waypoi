@@ -25,6 +25,7 @@ import { listVirtualModelSwitchEvents, listVirtualModels, saveVirtualModels } fr
 import { VirtualModelDefinition } from "../virtualModels/types";
 import { rebuildDefaultVirtualModels } from "../virtualModels/builder";
 import { BenchmarkCliOptions } from "../benchmark/types";
+import type { BenchmarkRunRecord } from "../benchmark/jobs";
 import { listBenchmarkExamples } from "../benchmark/runner";
 import { normalizeBenchmarkRunRequest } from "../benchmark/request";
 import {
@@ -51,6 +52,11 @@ import { promises as fs } from "fs";
 interface AdminEnv {
   adminToken?: string;
   version?: string;
+  // Test seam: override the real benchmark runner so tests stay hermetic.
+  benchmarkRunner?: (
+    paths: StoragePaths,
+    request: BenchmarkCliOptions
+  ) => Promise<BenchmarkRunRecord>;
 }
 
 interface ProviderModelPayload {
@@ -515,7 +521,10 @@ export async function registerAdminRoutes(app: FastifyInstance, paths: StoragePa
         });
         return;
       }
-      const run = await startBenchmarkRun(paths, normalizeBenchmarkRunRequest(req.body));
+      const run = await (env.benchmarkRunner ?? startBenchmarkRun)(
+        paths,
+        normalizeBenchmarkRunRequest(req.body)
+      );
       reply.code(202).send(run);
     }
   );

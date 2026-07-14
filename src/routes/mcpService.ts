@@ -19,6 +19,12 @@ export async function registerMcpServiceRoutes(
   const mcpService = createMcpService(paths, deps);
   activeMcpService = mcpService;
 
+  // Tear down open MCP sessions/transports when the app closes so they
+  // don't keep the process (and the test runner) alive.
+  app.addHook("onClose", async () => {
+    await mcpService.close();
+  });
+
   app.route({
     method: ["GET", "POST", "DELETE"],
     url: "/mcp",

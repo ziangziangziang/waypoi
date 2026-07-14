@@ -1,8 +1,8 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import path from "path";
 import { promises as fs } from "fs";
-import { createServer } from "node:http";
+import { createServer, Server } from "node:http";
 import Fastify from "fastify";
 import { registerAdminRoutes } from "../src/routes/admin";
 import { persistCaptureRecord, updateCaptureConfig } from "../src/storage/captureRepository";
@@ -27,11 +27,16 @@ async function makeWorkspaceTempDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(base, prefix));
 }
 
+// Track every upstream server so a test that throws before calling
+// upstream.close() can't leak a bound socket and keep the runner alive.
+const openUpstreamServers: Server[] = [];
+
 async function startUpstreamServer(
   handler: Parameters<typeof createServer>[0]
 ): Promise<{ baseUrl: string; close: () => Promise<void> }> {
   const server = createServer(handler);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  openUpstreamServers.push(server);
   const address = server.address();
   if (!address || typeof address === "string") {
     throw new Error("failed to bind upstream test server");
@@ -40,9 +45,19 @@ async function startUpstreamServer(
     baseUrl: `http://127.0.0.1:${address.port}`,
     close: async () => {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+      const idx = openUpstreamServers.indexOf(server);
+      if (idx >= 0) openUpstreamServers.splice(idx, 1);
     },
   };
 }
+
+after(async () => {
+  await Promise.all(
+    openUpstreamServers.splice(0).map(
+      (server) => new Promise<void>((resolve) => server.close(() => resolve()))
+    )
+  );
+});
 
 test("admin capture endpoints expose config, list, and detail", async () => {
   const baseDir = await makeWorkspaceTempDir("waypoi-capture-admin-test-");
